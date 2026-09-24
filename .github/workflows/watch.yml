@@ -1,0 +1,53 @@
+name: watch
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 2 hours from Thursday through Monday morning (UTC days 4,5,6,0,1). Injury-status changes and
+    # projection drops for your roster and the opponent's starters. Silent when nothing changed.
+    - cron: "0 */2 * * 4,5,6,0,1"
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Sleeper player list (5 MB, fetched at most once a day)
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: players-${{ steps.date.outputs.today }}
+
+      - name: Restore last poll
+        uses: actions/cache/restore@v4
+        with:
+          path: watch_state.json
+          key: watch-state-${{ github.run_id }}
+          restore-keys: watch-state-
+
+      - name: Status changes to Telegram
+        run: python fantasy_check.py --mode watch --telegram
+        env:
+          SLEEPER_CACHE_DIR: .cache
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          SWID: ${{ secrets.SWID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Save last poll
+        if: hashFiles('watch_state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: watch_state.json
+          key: watch-state-${{ github.run_id }}

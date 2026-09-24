@@ -4,6 +4,7 @@ Platform-neutral model and report sections shared by the Sleeper and ESPN adapte
 Slot vocabulary is Sleeper's: QB RB WR TE K DEF FLEX WRRB_FLEX REC_FLEX SUPER_FLEX.
 """
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
@@ -20,6 +21,8 @@ FA_MIN_GAIN = 1.5      # this-week pickup must beat your weakest eligible starte
 SWAP_MIN_GAIN = 0.5    # ignore lineup swaps worth less than this (projection noise)
 WAIVER_MIN_GAIN = 1.5  # waiver target must beat your drop candidate's season average by this much
 PROJ_DISAGREE = 3.0    # flag Sleeper vs ESPN projection gaps of this size
+PROJ_DROP = 0.30       # watch mode: projection fell by this fraction since the last poll
+MOVES_HOURS = 24       # check mode: league transactions this recent
 BYE_LOOKAHEAD = 2      # weeks
 
 # Depth that matters for trade value in a 2RB/2WR/2FLEX format
@@ -71,6 +74,7 @@ class Snapshot:
     game_status: dict = field(default_factory=dict)   # team -> pre_game / in_game / complete / bye
     byes: dict = field(default_factory=dict)          # team -> next bye week within lookahead
     games: dict = field(default_factory=dict)         # team -> {opp, home, date} this week
+    moves: list = field(default_factory=list)         # league transactions: dicts ts, team, action, pid, mine, status, bid
     next_opp: str = ""                                # next week's opponent (dashboard)
     # recap (last week)
     last_week: Optional[int] = None
@@ -317,7 +321,68 @@ def report_check(snap: Snapshot):
     issues += i
     lines += section_opponent(snap, total(snap, best))
     lines += section_byes(snap)
+    m, i = section_moves(snap)
+    lines += m
+    issues += i
     return lines, issues
+
+
+def section_moves(snap: Snapshot, hours=MOVES_HOURS):
+    """Your own transactions and other teams' drops that beat your bench, from the last `hours`."""
+    since = time.time() - hours * 3600
+    recent = sorted((m for m in snap.moves if m.get("ts", 0) >= since), key=lambda m: m["ts"])
+    if not recent:
+        return [], []
+    lines, issues = [f"🔄 League moves (last {hours}h):"], []
+    starters = {p for p in snap.me.starters if p}
+    bench = [p for p in snap.me.players if p not in starters and snap.p(p).pos not in ("K", "DEF")]
+    floor = min(bench, key=snap.pts) if bench else None
+    mine = [m for m in recent if m["mine"]]
+    for m in mine:
+        verb = {"add": "added", "drop": "dropped", "waiver add": "claimed", "trade": "traded"}.get(m["action"], m["action"])
+        st = f" ({m['status']})" if m.get("status") and m["status"] != "complete" else ""
+        bid = f" for ${m['bid']}" if m.get("bid") else ""
+        lines.append(f"  - you {verb} {snap.fmt(m['pid'])}{bid}{st}")
+    notable, other = [], 0
+    for m in recent:
+        if m["mine"]:
+            continue
+        if m["action"] == "drop" and floor and startable(snap, m["pid"]) and snap.pts(m["pid"]) >= snap.pts(floor) + 1.0:
+            notable.append(f"  💡 {m['team']} dropped {snap.fmt(m['pid'])}, beats your {snap.label(floor)} ({snap.pts(floor):.1f})")
+        else:
+            other += 1
+    lines += notable
+    if other:
+        lines.append(f"  {other} other move{'s' if other != 1 else ''} around the league")
+    if notable:
+        issues.append(plural(len(notable), "dropped player worth a look"))
+    return lines + [""], issues
+
+
+# ---------- watch mode: status and projection changes ----------
+
+def section_watch(snap: Snapshot, state: dict):
+    """Events since the last poll for your roster and the opponent's starters. Returns (lines, count, new_state)."""
+    prev = state.get("players", {})
+    first = "players" not in state
+    watch = [(pid, "starter") for pid in snap.me.starters if pid]
+    watch += [(pid, "bench") for pid in snap.me.players if pid not in {p for p, _ in watch}]
+    watch += [(pid, "their starter") for pid in (snap.opp.starters if snap.opp else []) if pid]
+    events, new = [], {}
+    for pid, role in watch:
+        p = snap.p(pid)
+        new[pid] = {"status": p.status, "pts": p.pts}
+        if first or pid not in prev or snap.locked(pid):
+            continue
+        old = prev[pid]
+        if old.get("status") != p.status:
+            arrow = f"{old.get('status') or 'Healthy'} → {p.status or 'Healthy'}"
+            icon = "🚑" if p.status in BAD_STATUSES else "🩺" if p.status else "💪"
+            events.append(f"  {icon} {snap.label(pid)} ({role}): {arrow}" + (f". {p.note}" if p.note and p.status else ""))
+        elif old.get("pts", 0) > 0 and p.pts < old["pts"] * (1 - PROJ_DROP):
+            events.append(f"  📉 {snap.label(pid)} ({role}): projection {old['pts']:.1f} → {p.pts:.1f}")
+    lines = [f"*{snap.name}*"] + events if events else []
+    return lines, len(events), {"players": new}
 
 
 # ---------- waivers mode ----------
@@ -572,16 +637,26 @@ def section_live(snap: Snapshot, state: dict):
             diff = act(pid) - snap.pts(pid)
             finals.append(f"  ✅ {snap.label(pid)} final {act(pid):.1f} (proj {snap.pts(pid):.1f}, {diff:+.1f})")
             reported_final.add(pid)
+    my_left = [p for p in mine if game_state(snap, p) != "final"]
+    opp_left = [p for p in theirs if game_state(snap, p) != "final"]
     new_state = {"pts": {pid: act(pid) for pid in mine + theirs}, "final": sorted(reported_final),
-                 "done": state.get("done", False)}
+                 "done": state.get("done", False), "left": len(my_left) + len(opp_left)}
+    endgame = 0 < len(my_left) + len(opp_left) <= 4
+    left_changed = endgame and state.get("left") is not None and state["left"] != new_state["left"]
     lines = []
-    if events or finals:
+    if events or finals or left_changed:
         my_total, opp_total = sum(act(p) for p in mine), sum(act(p) for p in theirs)
         played = sum(1 for p in mine if game_state(snap, p) == "final")
         live_n = sum(1 for p in mine if game_state(snap, p) == "live")
         opp = snap.opp.name if snap.opp else "opponent"
         lines.append(f"*{snap.name}*: you {my_total:.1f}, {opp} {opp_total:.1f}  ({played}/{len(mine)} final, {live_n} playing)")
         lines += events + finals
+        if endgame:
+            diff = my_total - opp_total
+            def left_txt(pids):
+                return ", ".join(f"{snap.label(p)} (proj {snap.pts(p):.1f}{', live' if game_state(snap, p) == 'live' else ''})" for p in pids) or "nobody"
+            lead = f"Up {diff:.1f}" if diff > 0 else f"Down {-diff:.1f}" if diff < 0 else "Tied"
+            lines.append(f"  📊 {lead}. Left: you {left_txt(my_left)}; them {left_txt(opp_left)}.")
     all_done = mine and all(game_state(snap, p) == "final" for p in mine)
     if all_done and not state.get("done"):
         my_total, opp_total = sum(act(p) for p in mine), sum(act(p) for p in theirs)

@@ -12,6 +12,8 @@ Modes:
             your starters' finals vs projection, and the result once your week is done. Silent otherwise.
   dashboard writes a self-contained HTML page (both leagues: lineups with live points, opponent, results,
             standings, full check report) to --out
+  watch     injury-status changes and projection drops of 30%+ for your roster and the opponent's starters
+            since the last poll. Silent otherwise. Meant to run every couple of hours Thu-Sun.
 
 Usage:
   python fantasy_check.py                       # check, both leagues
@@ -40,6 +42,7 @@ from pathlib import Path
 import requests
 
 import core
+from core import plural
 
 HERE = Path(__file__).resolve().parent
 
@@ -121,7 +124,7 @@ def load_state(path, week):
         state = json.loads(path.read_text())
     except (OSError, ValueError):
         state = {}
-    if state.get("week") != week:
+    if week is not None and state.get("week") != week:
         state = {"week": week}
     return state
 
@@ -139,18 +142,21 @@ def load(name, mode, week):
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=["check", "waivers", "recap", "live", "dashboard"], default="check")
+    ap.add_argument("--mode", choices=["check", "waivers", "recap", "live", "dashboard", "watch"], default="check")
     ap.add_argument("--out", default=str(HERE / "dashboard.html"), help="dashboard mode: output HTML path")
     ap.add_argument("--leagues", default="sleeper,espn", help="comma list: sleeper,espn")
     ap.add_argument("--week", type=int, help="NFL week (default: current)")
-    ap.add_argument("--state", default=str(HERE / "live_state.json"), help="live mode: where to remember the last poll")
+    ap.add_argument("--state", default=None, help="live/watch mode: where to remember the last poll (default live_state.json / watch_state.json)")
     ap.add_argument("--force", action="store_true", help="live mode: run even when no game is in progress")
     ap.add_argument("--notify", action="store_true", help="macOS notification when there's something to act on")
     ap.add_argument("--telegram", action="store_true", help="send report via TELEGRAM_BOT_TOKEN to TELEGRAM_CHAT_ID")
     ap.add_argument("--slack", action="store_true", help="post report to SLACK_WEBHOOK_URL")
     args = ap.parse_args()
 
-    state, state_path, complete = None, Path(args.state), set()
+    state_path = Path(args.state) if args.state else HERE / ("watch_state.json" if args.mode == "watch" else "live_state.json")
+    state, complete = None, set()
+    if args.mode == "watch":
+        state = load_state(state_path, None)  # re-keyed to the week once we know it
     if args.mode == "live":
         try:
             prior = load_state(state_path, None)
@@ -167,7 +173,7 @@ def main():
     snaps, lines, issues, failures, recaps = [], [], {}, [], []
     for name in [n.strip() for n in args.leagues.split(",") if n.strip()]:
         try:
-            snaps.append(load(name, args.mode, args.week))
+            snaps.append(load(name, "check" if args.mode == "watch" else args.mode, args.week))
         except Exception as e:  # noqa: BLE001
             failures.append(f"{name}: {type(e).__name__}: {e}")
             traceback.print_exc()
@@ -195,10 +201,18 @@ def main():
             print(f"❌ {f}", file=sys.stderr)
         sys.exit(1 if failures and not snaps else 0)
 
+    if args.mode == "watch" and snaps:
+        wk = snaps[0].week
+        if state.get("week") != wk:
+            state = {"week": wk}
+
     for snap in snaps:
         if args.mode == "live":
             l, n, state[snap.key] = core.section_live(snap, state.get(snap.key, {}))
             i = [f"{n} updates"] if n else []
+        elif args.mode == "watch":
+            l, n, state[snap.key] = core.section_watch(snap, state.get(snap.key, {}))
+            i = [plural(n, "status change")] if n else []
         elif args.mode == "check":
             l, i = core.report_check(snap)
         elif args.mode == "waivers":
@@ -223,6 +237,7 @@ def main():
 
     if args.mode == "live":
         state["final_teams"] = sorted(complete | set(state.get("final_teams", [])))
+    if args.mode in ("live", "watch"):
         state_path.write_text(json.dumps(state))
         if not any(l.strip() for l in lines):
             return  # polled, nothing new
@@ -234,7 +249,7 @@ def main():
     print(report)
 
     if args.notify:
-        title = {"check": "Fantasy check", "waivers": "Waiver targets", "recap": "Weekly recap", "live": "Live"}[args.mode]
+        title = {"check": "Fantasy check", "waivers": "Waiver targets", "recap": "Weekly recap", "live": "Live", "watch": "Status change"}[args.mode]
         if issues:
             body = "; ".join(f"{k}: {', '.join(v)}" for k, v in issues.items())
             notify(title, f"{body}. Run fantasy_check.py --mode {args.mode}")

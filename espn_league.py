@@ -171,6 +171,25 @@ def build(mode="check", week=None) -> Snapshot:
         except Exception as e:  # noqa: BLE001
             print(f"warning: ESPN next-week roster load failed: {e}", file=sys.stderr)
 
+    if mode in ("check", "dashboard"):
+        try:
+            for a in lg.recent_activity(size=30) or []:
+                ts = (a.date or 0) / 1000
+                for team_obj, action, pl, bid in a.actions:
+                    if not hasattr(pl, "playerId"):
+                        continue
+                    cp = players.get(str(pl.playerId))
+                    if not cp:
+                        cp = mk(pl, week)
+                        players[cp.pid] = cp
+                    act = ("drop" if "DROPPED" in action else "waiver add" if "WAIVER" in action
+                           else "trade" if "TRADED" in action else "add")
+                    snap.moves.append({"ts": ts, "team": getattr(team_obj, "team_name", str(team_obj)), "pid": cp.pid,
+                                       "bid": bid or None, "action": act,
+                                       "mine": getattr(team_obj, "team_id", None) == team_id, "status": "complete"})
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: ESPN recent activity failed: {e}", file=sys.stderr)
+
     if mode == "dashboard":
         for t, team in zip(lg.teams, teams):
             snap.standings.append({"name": team.name, "record": team.record, "pf": float(t.points_for or 0),

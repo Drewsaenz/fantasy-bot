@@ -3,3 +3,4 @@ __pycache__/
 .env
 *.log
 live_state.json
+watch_state.json

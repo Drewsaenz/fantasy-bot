@@ -33,8 +33,9 @@ def load_players():
     return data
 
 
-def load_projections(season, week, key):
-    """player_id -> projected points. week=None gives season totals."""
+def load_projections(season, week, key, status_out=None):
+    """player_id -> projected points. week=None gives season totals.
+    status_out, if given, collects the row's fresh injury_status (fresher than the daily player file)."""
     out = {}
     url = f"{PROJ_BASE}/{season}" + (f"/{week}" if week else "")
     for pos in POSITIONS:
@@ -50,6 +51,8 @@ def load_projections(season, week, key):
                 pts = stats.get("pts_ppr", stats.get("pts_half_ppr", stats.get("pts_std")))
             if pts is not None and row.get("player_id"):
                 out[str(row["player_id"])] = float(pts)
+            if status_out is not None and row.get("player_id") and row.get("player") is not None:
+                status_out[str(row["player_id"])] = row["player"].get("injury_status") or None
     return out
 
 
@@ -90,7 +93,8 @@ def build(mode="check", week=None) -> Snapshot:
     rosters = get(f"{BASE}/league/{league_id}/rosters")
 
     db = load_players()
-    proj = load_projections(season, week, key)
+    fresh_status = {}
+    proj = load_projections(season, week, key, status_out=fresh_status)
     want_next = mode in ("waivers", "dashboard")
     proj_next = load_projections(season, week + 1, key) if want_next else {}
     proj_season = load_projections(season, None, key) if want_next else {}
@@ -108,7 +112,7 @@ def build(mode="check", week=None) -> Snapshot:
         name = p.get("full_name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or f"player {pid}"
         return Player(
             pid=pid, name=name, pos=pos, team=team,
-            status=p.get("injury_status") or None,
+            status=fresh_status[pid] if pid in fresh_status else (p.get("injury_status") or None),
             pts=proj.get(pid, 0.0),
             pts_next=proj_next.get(pid, 0.0),
             season_avg=proj_season.get(pid, 0.0) / GAMES_PER_SEASON,
@@ -169,6 +173,35 @@ def build(mode="check", week=None) -> Snapshot:
                 players.setdefault(pid, mk(pid)).actual = float(pts or 0)
     except (StopIteration, requests.RequestException):
         snap.opp = None
+
+    if mode in ("check", "dashboard"):
+        seen = set()
+        for leg in (week - 1, week, week + 1):
+            if leg < 1:
+                continue
+            try:
+                txs = get(f"{BASE}/league/{league_id}/transactions/{leg}")
+            except requests.RequestException:
+                continue
+            for tx in txs or []:
+                if tx.get("transaction_id") in seen:
+                    continue
+                seen.add(tx.get("transaction_id"))
+                ts = (tx.get("status_updated") or tx.get("created") or 0) / 1000
+                kind = tx.get("type")
+                bid = (tx.get("settings") or {}).get("waiver_bid")
+                for pid, rid in (tx.get("adds") or {}).items():
+                    t = next((t for t in teams if t.tid == str(rid)), None)
+                    players.setdefault(pid, mk(pid))
+                    snap.moves.append({"ts": ts, "team": t.name if t else f"roster {rid}", "pid": pid, "bid": bid,
+                                       "action": "trade" if kind == "trade" else "waiver add" if kind == "waiver" else "add",
+                                       "mine": bool(t and t.tid == me.tid), "status": tx.get("status")})
+                for pid, rid in (tx.get("drops") or {}).items():
+                    t = next((t for t in teams if t.tid == str(rid)), None)
+                    players.setdefault(pid, mk(pid))
+                    snap.moves.append({"ts": ts, "team": t.name if t else f"roster {rid}", "pid": pid, "bid": None,
+                                       "action": "trade" if kind == "trade" else "drop",
+                                       "mine": bool(t and t.tid == me.tid), "status": tx.get("status")})
 
     if mode == "dashboard":
         for r, t in zip(rosters, teams):

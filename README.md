@@ -42,9 +42,14 @@ Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 **recap** (Tue 9 AM)
 - Last week's result, starters projected vs scored, points left on the bench with who should have started, biggest boom and bust, any zeros.
 
+The check report also ends with **League moves (last 24h)**: your own adds, drops, and waiver results, plus any player another team dropped who projects at least a point better than your weakest skill-position bench player.
+
+**watch** (every 2 hours, Thursday through Monday morning)
+- Injury-status changes for your whole roster and the opponent's starters (Healthy → Questionable → Out and back), with Sleeper's injury note when there is one, and projection drops of 30% or more since the last poll, which usually means news broke. Locked players are skipped. Silent when nothing changed. State in `watch_state.json`.
+
 **live** (every 10 minutes, all week)
 - Exits silently unless a game is in progress or has just finished, so it costs nothing outside game windows.
-- Sends a Telegram message only when something happened since the last poll: one of your starters or your opponent's gained 6 or more points, one of your starters' games went final (actual vs projected), or all your starters are done (result). Each message starts with the live score.
+- Sends a Telegram message only when something happened since the last poll: one of your starters or your opponent's gained 6 or more points, one of your starters' games went final (actual vs projected), or all your starters are done (result). Each message starts with the live score. Once four or fewer players remain across both sides, it also says who is left and by how much you lead or trail, and sends that whenever another of those players finishes.
 - Remembers the last poll in `live_state.json`. Delete it to reset. `--force` runs it outside a game window, `--week N` replays a past week.
 
 ## Notifications
@@ -76,6 +81,7 @@ The `.github/workflows/` folder mirrors the launchd jobs so nothing depends on t
 | `waivers.yml` | Tue 8 PM | |
 | `recap.yml` | Tue 9 AM | |
 | `live.yml` | every 10 min in game windows (Thu, Sun, Mon nights, Sunday afternoon) | remembers the last poll via the Actions cache; redeploys the dashboard while games are on |
+| `watch.yml` | every 2 hours, Thu through Mon | status and projection changes; last poll via the Actions cache |
 
 GitHub cron is UTC and ignores daylight saving, so each slot is scheduled at both offsets and a gate step keeps the one that lands at the right Central time. Saturday games in December and holiday games are not in the live windows; run the workflow by hand from the Actions tab if you want live updates for those.
 
