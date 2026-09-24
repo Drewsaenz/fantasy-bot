@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.drew.fantasy.recap</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/drews/Desktop/Home/fantasy-bot/.venv/bin/python</string>
+        <string>/Users/drews/Desktop/Home/fantasy-bot/fantasy_check.py</string>
+        <string>--mode</string>
+        <string>recap</string>
+        <string>--notify</string>
+        <string>--telegram</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot</string>
+
+    <!-- Tuesday 9:00 AM local: last week's recap once Monday Night Football is in the books. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot/recap.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot/recap.log</string>
+</dict>
+</plist>

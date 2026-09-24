@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.drew.fantasy.live</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/drews/Desktop/Home/fantasy-bot/.venv/bin/python</string>
+        <string>/Users/drews/Desktop/Home/fantasy-bot/fantasy_check.py</string>
+        <string>--mode</string>
+        <string>live</string>
+        <string>--telegram</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot</string>
+
+    <!-- Every 10 minutes. The script exits in under a second unless a game is in progress
+         or has just finished, so this is cheap outside game windows. -->
+    <key>StartInterval</key>
+    <integer>600</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot/live.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drews/Desktop/Home/fantasy-bot/live.log</string>
+</dict>
+</plist>
