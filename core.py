@@ -40,6 +40,7 @@ class Player:
     bye: bool = False                 # on bye this week
     owned_pct: Optional[float] = None
     note: str = ""                    # injury detail when the platform has it
+    trend: list = field(default_factory=list)  # actual points by week, None where unrostered / no data (dashboard)
 
     def positions(self):
         return {self.pos}
@@ -321,48 +322,59 @@ def report_check(snap: Snapshot):
 
 # ---------- waivers mode ----------
 
-def section_waivers(snap: Snapshot):
-    lines, issues = [f"*{snap.name} - Week {snap.week + 1} waiver targets*", ""], []
-    fixed_pos = [s for s in snap.slots if s in POSITIONS]
-    # this week's optimal decides who is "bench"
+def waiver_value(snap: Snapshot, pid):
+    """Season projection carries more weight than one week's matchup."""
+    p = snap.p(pid)
+    if not p.season_avg:
+        return p.pts_next
+    return 0.6 * p.season_avg + 0.4 * p.pts_next
+
+
+def waiver_targets(snap: Snapshot, per_pos=3):
+    """(drop_pid, rows). rows: dicts with pos, pid, gain, claim. A claim beats both the drop candidate
+    and your worst player at that position by WAIVER_MIN_GAIN; K/DEF only ever replace your own."""
     best = optimize(snap, snap.me.players, snap.slots)
     bench = [p for p in snap.me.players if p not in best]
     if not bench:
-        return lines + ["No bench players to drop."], issues
-
-    def value(pid):
-        # season projection carries more weight than one week's matchup
-        p = snap.p(pid)
-        if not p.season_avg:
-            return p.pts_next
-        return 0.6 * p.season_avg + 0.4 * p.pts_next
-
+        return None, []
+    value = lambda pid: waiver_value(snap, pid)  # noqa: E731
     skill_bench = [p for p in bench if snap.p(p).pos not in ("K", "DEF")] or bench
     drop = min(skill_bench, key=value)
-    lines.append(f"Drop candidate: {snap.label(drop)} (season avg {snap.p(drop).season_avg:.1f}, next week {snap.p(drop).pts_next:.1f})")
-    lines.append("")
-    claims = 0
+    rows = []
     for pos in POSITIONS:
         pool = [p for p in snap.free_agents if snap.p(p).pos == pos and snap.p(p).status not in BAD_STATUSES]
-        top = sorted(pool, key=value, reverse=True)[:3]
-        if not top:
-            continue
-        # A claim has to beat the drop candidate AND your worst player at that position,
-        # otherwise it's just a slightly better bench body. K/DEF only ever replace your own.
+        top = sorted(pool, key=value, reverse=True)[:per_pos]
         mine_here = [p for p in snap.me.players if snap.p(p).pos == pos]
         worst_here = min(mine_here, key=value) if mine_here else drop
         baseline = worst_here if pos in ("K", "DEF") else max((drop, worst_here), key=value)
-        rows = []
         for fa in top:
-            p = snap.p(fa)
             gain = value(fa) - value(baseline)
-            flag = " ⬆️ claim" if gain >= WAIVER_MIN_GAIN else ""
+            rows.append({"pos": pos, "pid": fa, "gain": gain, "claim": gain >= WAIVER_MIN_GAIN})
+    return drop, rows
+
+
+def section_waivers(snap: Snapshot):
+    lines, issues = [f"*{snap.name} - Week {snap.week + 1} waiver targets*", ""], []
+    drop, rows = waiver_targets(snap)
+    if not drop:
+        return lines + ["No bench players to drop."], issues
+    d = snap.p(drop)
+    lines.append(f"Drop candidate: {snap.label(drop)} (season avg {d.season_avg:.1f}, next week {d.pts_next:.1f})")
+    lines.append("")
+    claims = 0
+    for pos in POSITIONS:
+        here = [r for r in rows if r["pos"] == pos]
+        if not here:
+            continue
+        lines.append(f"{pos}:")
+        for r in here:
+            p = snap.p(r["pid"])
             own = f", {p.owned_pct:.0f}% owned" if p.owned_pct is not None else ""
             byew = snap.byes.get(p.team)
             bye = f", bye wk {byew}" if byew else ""
-            rows.append(f"  - {snap.label(fa)}: next wk {p.pts_next:.1f}, season avg {p.season_avg:.1f}{own}{bye}{flag}")
-            claims += bool(flag)
-        lines += [f"{pos}:"] + rows
+            flag = " ⬆️ claim" if r["claim"] else ""
+            lines.append(f"  - {snap.label(r['pid'])}: next wk {p.pts_next:.1f}, season avg {p.season_avg:.1f}{own}{bye}{flag}")
+            claims += r["claim"]
     if claims:
         issues.append(plural(claims, "waiver target"))
     return lines + [""], issues

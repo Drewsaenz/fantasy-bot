@@ -138,23 +138,29 @@ def build(mode="check", week=None) -> Snapshot:
     # free agents: this week's projection for check, next week's for waivers.
     # ESPN's K and D/ST queries return rostered players too, so filter against the rosters we just read.
     rostered = {pid for t in teams for pid in t.players} | {pid for t in teams for pid in t.starters if pid}
-    fa_week = week + 1 if mode == "waivers" else week
-    for pos in POSITIONS:
-        try:
-            fas = lg.free_agents(week=fa_week, size=FA_PAGE, position=ESPN_POS.get(pos, pos))
-        except Exception as e:  # noqa: BLE001
-            print(f"warning: ESPN free agents {pos} failed: {e}", file=sys.stderr)
-            continue
-        for p in fas:
-            if str(p.playerId) in rostered or getattr(p, "onTeamId", 0):
+    fa_weeks = [week + 1] if mode == "waivers" else [week, week + 1] if mode == "dashboard" else [week]
+    for fa_week in fa_weeks:
+        for pos in POSITIONS:
+            try:
+                fas = lg.free_agents(week=fa_week, size=FA_PAGE, position=ESPN_POS.get(pos, pos))
+            except Exception as e:  # noqa: BLE001
+                print(f"warning: ESPN free agents {pos} wk{fa_week} failed: {e}", file=sys.stderr)
                 continue
-            cp = mk(p, week, pts=p.projected_points)
-            if mode == "waivers":
-                cp.pts_next, cp.pts = cp.pts, 0.0
-            players[cp.pid] = cp
-            snap.free_agents.append(cp.pid)
+            for p in fas:
+                if str(p.playerId) in rostered or getattr(p, "onTeamId", 0):
+                    continue
+                cp = mk(p, week, pts=p.projected_points)
+                if fa_week != week:
+                    cp.pts_next, cp.pts = cp.pts, 0.0
+                prev = players.get(cp.pid)
+                if prev and cp.pid in snap.free_agents:  # seen for the other week: merge
+                    prev.pts_next = prev.pts_next or cp.pts_next
+                    prev.pts = prev.pts or cp.pts
+                    continue
+                players[cp.pid] = cp
+                snap.free_agents.append(cp.pid)
 
-    if mode == "waivers":
+    if mode in ("waivers", "dashboard"):
         # next-week projections for rostered players come from reloading rosters for that scoring period
         try:
             lg.load_roster_week(week + 1)
@@ -170,6 +176,15 @@ def build(mode="check", week=None) -> Snapshot:
             snap.standings.append({"name": team.name, "record": team.record, "pf": float(t.points_for or 0),
                                    "extra": team.extra, "is_me": team.tid == me.tid})
         snap.standings.sort(key=lambda d: (-int(d["record"].split("-")[0]), -d["pf"]))
+        try:  # weekly actuals for your roster and the opponent's, one batched lookup
+            ids = [int(pid) for t in (me, snap.opp) if t for pid in set(t.players) | {p for p in t.starters if p} if pid.lstrip("-").isdigit()]
+            infos = lg.player_info(playerId=ids) or []
+            for pi in (infos if isinstance(infos, list) else [infos]):
+                cp = players.get(str(pi.playerId))
+                if cp:
+                    cp.trend = [(pi.stats.get(w) or {}).get("points") for w in range(1, week)]
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: ESPN player trends failed: {e}", file=sys.stderr)
         mine_t = next(t for t in lg.teams if t.team_id == team_id)
         if len(mine_t.schedule) > week:
             snap.next_opp = getattr(mine_t.schedule[week], "team_name", "")

@@ -31,6 +31,10 @@ td:nth-child(2) { white-space:normal; }
 th { color:var(--muted); font-weight:500; font-size:12px; }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.bench td { color:var(--muted); }
+tr.live td { background:#eff6ff; }
+tr.live td.num.pts { color:var(--live); font-weight:600; }
+tr.done td { color:var(--muted); }
+tr.done td:nth-child(2) { color:var(--ink); }
 tr.me td { font-weight:600; }
 .tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:999px; background:var(--line); color:var(--ink); margin-left:4px; vertical-align:middle; }
 .tag.bad { background:#fee2e2; color:var(--bad); }
@@ -39,6 +43,7 @@ tr.me td { font-weight:600; }
 .tag.final { background:#dcfce7; color:var(--good); }
 .tag.bye { background:#f3f4f6; color:var(--muted); }
 .game { color:var(--muted); font-size:12px; white-space:normal; }
+svg.spark { width:56px; height:18px; display:block; }
 .game.live { color:var(--live); font-weight:600; }
 .issues { margin:0 0 10px; padding:8px 12px; border-radius:8px; background:#fef3c7; color:#7c2d12; font-size:13px; }
 .issues.ok { background:#dcfce7; color:#14532d; }
@@ -86,9 +91,32 @@ def game_cell(snap, pid):
     return f'<span class="game">{esc((when + " " + vs).strip())}</span>'
 
 
+def spark(p, proj):
+    """Tiny bar chart of weekly actuals; bar height relative to the best week, grey below projection, dark at/above."""
+    vals = p.trend
+    if not vals or all(v is None for v in vals):
+        return ""
+    n = len(vals)
+    top = max([v for v in vals if v is not None] + [proj, 1.0])
+    W, H = 56, 18
+    bw = max(2, min(6, (W - (n - 1) * 2) / n))  # left-aligned, fills in as the season goes
+    bars, tips = [], []
+    for i, v in enumerate(vals):
+        x = i * (bw + 2)
+        if v is None:
+            bars.append(f'<rect x="{x:.1f}" y="{H - 2}" width="{bw:.1f}" height="2" fill="var(--line)"/>')
+            tips.append(f"W{i + 1} –")
+            continue
+        h = max(1.5, v / top * (H - 1))
+        fill = "var(--ink)" if v >= proj else "var(--muted)"
+        bars.append(f'<rect x="{x:.1f}" y="{H - h:.1f}" width="{bw:.1f}" height="{h:.1f}" fill="{fill}" opacity="0.85" rx="1"/>')
+        tips.append(f"W{i + 1} {v:.1f}")
+    return f'<svg class="spark" viewBox="0 0 {W} {H}"><title>{esc(", ".join(tips))}</title>{"".join(bars)}</svg>'
+
+
 def player_row(snap, slot, pid, bench=False):
     if not pid:
-        return f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td colspan="5" class="neg">EMPTY</td></tr>'
+        return f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td colspan="6" class="neg">EMPTY</td></tr>'
     p = snap.p(pid)
     tags = ""
     title = f' title="{esc(p.note)}"' if p.note else ""
@@ -105,8 +133,9 @@ def player_row(snap, slot, pid, bench=False):
     act_html = f"{actual:.1f}" if actual is not None else '<span style="color:var(--muted)">–</span>'
     diff_html = signed(actual - p.pts) if actual is not None and gs == "final" else ""
     name = f"{p.team} D/ST" if p.pos == "DEF" else f"{p.name} <span style='color:var(--muted)'>{p.pos}-{p.team}</span>"
-    return (f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td>{name}{tags}</td><td>{game_cell(snap, pid)}</td>'
-            f'<td class="num">{p.pts:.1f}</td><td class="num">{act_html}</td><td class="num">{diff_html}</td></tr>')
+    cls = " ".join(c for c in ("bench" if bench else "", "live" if gs == "live" else "done" if gs == "final" else "") if c)
+    return (f'<tr class="{cls}"><td>{esc(slot)}</td><td>{name}{tags}</td><td>{spark(p, p.pts)}</td><td>{game_cell(snap, pid)}</td>'
+            f'<td class="num">{p.pts:.1f}</td><td class="num pts">{act_html}</td><td class="num">{diff_html}</td></tr>')
 
 
 def lineup_table(snap, team, bench=True):
@@ -115,7 +144,7 @@ def lineup_table(snap, team, bench=True):
         starters = set(p for p in team.starters if p)
         for pid in sorted((p for p in team.players if p not in starters), key=snap.pts, reverse=True):
             rows.append(player_row(snap, "BN", pid, bench=True))
-    return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th>Game</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
+    return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th>Trend</th><th>Game</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
@@ -150,6 +179,27 @@ def standings_table(st):
     return f'<div class="scroll"><table><thead><tr><th>#</th><th>Team</th><th class="num">W-L</th><th class="num">PF</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>'
 
 
+def waivers_block(snap):
+    drop, rows = core.waiver_targets(snap, per_pos=2)
+    if not drop or not rows:
+        return ""
+    d = snap.p(drop)
+    trs = []
+    for r in rows:
+        p = snap.p(r["pid"])
+        own = f"{p.owned_pct:.0f}%" if p.owned_pct is not None else ""
+        bye = f'<span class="tag bye">bye wk {snap.byes[p.team]}</span>' if snap.byes.get(p.team) else ""
+        flag = '<span class="tag final">claim</span>' if r["claim"] else ""
+        name = f"{p.team} D/ST" if p.pos == "DEF" else f"{p.name} <span style='color:var(--muted)'>{p.team}</span>"
+        trs.append(f'<tr><td>{r["pos"]}</td><td>{name}{bye}{flag}</td><td class="num">{p.pts_next:.1f}</td>'
+                   f'<td class="num">{p.season_avg:.1f}</td><td class="num">{own}</td></tr>')
+    return (f"<h3>Waiver targets · week {snap.week + 1}</h3>"
+            f'<div class="sub">Drop candidate: {esc(snap.label(drop))} (season avg {d.season_avg:.1f}, next week {d.pts_next:.1f}). '
+            f'"claim" beats both your drop and your worst at that position.</div>'
+            '<div class="scroll"><table><thead><tr><th>Pos</th><th>Player</th><th class="num">Next wk</th><th class="num">Season</th><th class="num">Owned</th></tr></thead>'
+            f'<tbody>{"".join(trs)}</tbody></table></div>')
+
+
 def league_card(snap, report):
     report_text, issues = ("\n".join(report[0]), report[1]) if report else ("", [])
     act = lambda pid: (snap.p(pid).actual or 0.0) if pid and core.game_state(snap, pid) != "pre" else 0.0  # noqa: E731
@@ -168,15 +218,23 @@ def league_card(snap, report):
         parts.append(f'<div class="issues">⚠️ {esc(", ".join(issues))}. Details in the report below.</div>')
     else:
         parts.append('<div class="issues ok">✅ Lineup is set. Nothing to fix right now.</div>')
+    def playing(team):
+        if not team:
+            return ""
+        n = sum(1 for pid in team.starters if pid and core.game_state(snap, pid) == "live")
+        left = sum(1 for pid in team.starters if pid and core.game_state(snap, pid) == "pre")
+        bits = ([f"{n} playing"] if n else []) + ([f"{left} to play"] if left else [])
+        return (" · " + ", ".join(bits)) if bits else " · all done"
     parts.append(
         '<div class="score">'
-        f'<div class="side"><div class="big">{my_act:.1f}</div><div class="proj">you · proj {my_proj:.1f}</div></div>'
+        f'<div class="side"><div class="big">{my_act:.1f}</div><div class="proj">you · proj {my_proj:.1f}{playing(snap.me)}</div></div>'
         '<div class="vs">vs</div>'
-        f'<div class="side them"><div class="big">{opp_act:.1f}</div><div class="proj">{esc(opp.name) if opp else "no matchup"} · proj {opp_proj:.1f}</div></div>'
+        f'<div class="side them"><div class="big">{opp_act:.1f}</div><div class="proj">{esc(opp.name) if opp else "no matchup"} · proj {opp_proj:.1f}{playing(opp)}</div></div>'
         '</div>')
     parts.append(lineup_table(snap, snap.me))
     if opp:
         parts.append(f"<h3>{esc(opp.name)}</h3>" + lineup_table(snap, opp, bench=False))
+    parts.append(waivers_block(snap))
     parts.append("<h3>Results</h3>" + history_svg(snap.history))
     if snap.standings:
         parts.append("<h3>Standings</h3>" + standings_table(snap.standings))

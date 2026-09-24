@@ -53,6 +53,15 @@ def load_projections(season, week, key):
     return out
 
 
+def team_label(owner, roster_id):
+    """'Team Name (username)' so custom team names stay recognizable; just the username when there is no team name."""
+    team = (owner.get("metadata") or {}).get("team_name")
+    user = owner.get("display_name")
+    if team and user and team.strip().lower() != user.strip().lower():
+        return f"{team} ({user})"
+    return team or user or f"roster {roster_id}"
+
+
 def current_week(state):
     dw, w = state.get("display_week"), state.get("week")
     if dw and w and dw != w:
@@ -82,8 +91,9 @@ def build(mode="check", week=None) -> Snapshot:
 
     db = load_players()
     proj = load_projections(season, week, key)
-    proj_next = load_projections(season, week + 1, key) if mode == "waivers" else {}
-    proj_season = load_projections(season, None, key) if mode == "waivers" else {}
+    want_next = mode in ("waivers", "dashboard")
+    proj_next = load_projections(season, week + 1, key) if want_next else {}
+    proj_season = load_projections(season, None, key) if want_next else {}
 
     sched = sleeper_schedule(season)
     this_week = sched.get(week, {})
@@ -119,7 +129,7 @@ def build(mode="check", week=None) -> Snapshot:
         owner = users_by_id.get(r.get("owner_id"), {})
         t = Team(
             tid=str(r["roster_id"]),
-            name=(owner.get("metadata") or {}).get("team_name") or owner.get("display_name") or f"roster {r['roster_id']}",
+            name=team_label(owner, r["roster_id"]),
             players=pids,
             starters=[(p if p and p != "0" else None) for p in (r.get("starters") or [])],
             record=f"{s.get('wins', 0)}-{s.get('losses', 0)}" + (f"-{s['ties']}" if s.get("ties") else ""),
@@ -131,7 +141,7 @@ def build(mode="check", week=None) -> Snapshot:
     if not me:
         raise RuntimeError("Couldn't find your Sleeper roster")
 
-    fa_source = proj_next if mode == "waivers" else proj
+    fa_source = proj_next if mode == "waivers" else {**proj_next, **proj} if mode == "dashboard" else proj
     free_agents = [pid for pid in fa_source if pid not in rostered]
     for pid in free_agents:
         players[pid] = mk(pid)
@@ -175,9 +185,13 @@ def build(mode="check", week=None) -> Snapshot:
             snap.next_opp = ot.name if ot else ""
         except (StopIteration, requests.RequestException):
             pass
+        weekly = {}  # pid -> {week: pts} for every player rostered by anyone that week
         for w in range(1, week):
             try:
                 ms = get(f"{BASE}/league/{league_id}/matchups/{w}")
+                for m in ms:
+                    for pid, pts in (m.get("players_points") or {}).items():
+                        weekly.setdefault(pid, {})[w] = float(pts or 0)
                 mm = next(m for m in ms if str(m["roster_id"]) == me.tid)
                 om = next((m for m in ms if m.get("matchup_id") == mm.get("matchup_id") and str(m["roster_id"]) != me.tid), None)
                 ot = next((t for t in teams if om and t.tid == str(om["roster_id"])), None)
@@ -186,6 +200,9 @@ def build(mode="check", week=None) -> Snapshot:
                                      "opp": ot.name if ot else "bye"})
             except (StopIteration, requests.RequestException):
                 continue
+        for pid, byweek in weekly.items():
+            if pid in players:
+                players[pid].trend = [byweek.get(w) for w in range(1, week)]
 
     # recap: last week
     if mode == "recap" and week > 1:
