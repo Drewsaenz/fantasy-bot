@@ -1,0 +1,84 @@
+name: live
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 10 minutes inside NFL game windows (Central), padded for both DST offsets.
+    # The script exits quietly when no game is in progress, so off-window runs are cheap.
+    - cron: "*/10 0-5 * * 5"    # Thu night (Fri 00:00-05:59 UTC)
+    - cron: "*/10 17-23 * * 0"  # Sunday afternoon
+    - cron: "*/10 0-5 * * 1"    # Sunday night (Mon 00:00-05:59 UTC)
+    - cron: "*/10 0-5 * * 2"    # Mon night (Tue 00:00-05:59 UTC)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Sleeper player list (5 MB, fetched at most once a day)
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: players-${{ steps.date.outputs.today }}
+
+      - name: Restore last poll
+        uses: actions/cache/restore@v4
+        with:
+          path: live_state.json
+          key: live-state-${{ github.run_id }}
+          restore-keys: live-state-
+
+      - name: Live updates to Telegram
+        id: live
+        run: |
+          python fantasy_check.py --mode live --telegram | tee live.out
+          if [ -s live.out ]; then echo active=true >> "$GITHUB_OUTPUT"; else echo active=false >> "$GITHUB_OUTPUT"; fi
+        env:
+          SLEEPER_CACHE_DIR: .cache
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          SWID: ${{ secrets.SWID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Save last poll
+        if: hashFiles('live_state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: live_state.json
+          key: live-state-${{ github.run_id }}
+
+      # Refresh the dashboard whenever a game is in progress (state file was touched this run)
+      - if: hashFiles('live_state.json') != ''
+        name: Build dashboard
+        run: python fantasy_check.py --mode dashboard --out site/index.html
+        env:
+          SLEEPER_CACHE_DIR: .cache
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          SWID: ${{ secrets.SWID }}
+      - if: hashFiles('site/index.html') != ''
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - if: hashFiles('site/index.html') != ''
+        id: deploy
+        uses: actions/deploy-pages@v4

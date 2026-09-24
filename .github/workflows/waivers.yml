@@ -1,0 +1,48 @@
+name: waivers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1,2 * * 3"   # Tue 8:00 PM Central (Wed 01:00 UTC in CDT, 02:00 in CST)
+
+permissions:
+  contents: read
+
+jobs:
+  waivers:
+    runs-on: ubuntu-latest
+    steps:
+      - id: gate
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then echo run=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          now=$(TZ=America/Chicago date +%u-%H:%M)
+          case "$now" in
+            2-20:[0-2]*) echo run=true >> "$GITHUB_OUTPUT" ;;
+            *) echo "skip: $now Central"; echo run=false >> "$GITHUB_OUTPUT" ;;
+          esac
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.gate.outputs.run == 'true'
+        run: pip install -r requirements.txt
+      - if: steps.gate.outputs.run == 'true'
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: players-${{ steps.date.outputs.today }}
+      - if: steps.gate.outputs.run == 'true'
+        name: Waiver targets and trade ideas to Telegram
+        run: python fantasy_check.py --mode waivers --telegram
+        env:
+          SLEEPER_CACHE_DIR: .cache
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          SWID: ${{ secrets.SWID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
