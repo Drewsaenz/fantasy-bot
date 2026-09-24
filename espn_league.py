@@ -88,7 +88,7 @@ def build(mode="check", week=None) -> Snapshot:
             players[cp.pid] = cp
             if getattr(p, "lineupSlot", "") != "IR":
                 pids.append(cp.pid)
-        extra = f"{t.playoff_pct:.0f}% playoff odds" if getattr(t, "playoff_pct", None) else ""
+        extra = f"{t.playoff_pct:.0f}% playoffs" if getattr(t, "playoff_pct", None) else ""
         team = Team(tid=str(t.team_id), name=t.team_name, players=pids, starters=[None] * len(slots),
                     record=f"{t.wins}-{t.losses}" + (f"-{t.ties}" if t.ties else ""), extra=extra)
         teams.append(team)

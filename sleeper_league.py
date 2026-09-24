@@ -146,8 +146,11 @@ def build(mode="check", week=None) -> Snapshot:
         opp_m = next(m for m in matchups
                      if m.get("matchup_id") == my_m.get("matchup_id") and str(m["roster_id"]) != me.tid)
         snap.opp = next(t for t in teams if t.tid == str(opp_m["roster_id"]))
-        if opp_m.get("starters"):
-            snap.opp.starters = [(p if p and p != "0" else None) for p in opp_m["starters"]]
+        # the matchup carries that week's lineups, which matters when --week points at a past week
+        for m, t in ((my_m, me), (opp_m, snap.opp)):
+            if m.get("starters"):
+                t.starters = [(p if p and p != "0" else None) for p in m["starters"]]
+                t.starters += [None] * (len(slots) - len(t.starters))
         # live / actual points so far this week
         for m in (my_m, opp_m):
             for pid, pts in (m.get("players_points") or {}).items():

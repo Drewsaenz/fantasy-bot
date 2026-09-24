@@ -57,6 +57,34 @@ Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 
 Either flag logs a warning and continues if its credentials are missing.
 
+## Dashboard
+
+```sh
+.venv/bin/python fantasy_check.py --mode dashboard          # writes dashboard.html here
+open dashboard.html
+```
+
+One self-contained page, both leagues: live score vs opponent, your lineup and bench with projected and actual points and LIVE/FINAL tags, the opponent's lineup, weekly results, standings, and the full check report folded under each card. Refreshes itself every 5 minutes. On GitHub it is rebuilt by the check and live workflows and served by GitHub Pages.
+
+## GitHub Actions (runs with the Mac off)
+
+The `.github/workflows/` folder mirrors the launchd jobs so nothing depends on this Mac being awake:
+
+| Workflow | Schedule (Central) | Notes |
+|---|---|---|
+| `check.yml` | Wed 8 AM, Thu 4 PM, Sun 10 AM, 11:30 AM, 6:30 PM | also rebuilds and deploys the dashboard |
+| `waivers.yml` | Tue 8 PM | |
+| `recap.yml` | Tue 9 AM | |
+| `live.yml` | every 10 min in game windows (Thu, Sun, Mon nights, Sunday afternoon) | remembers the last poll via the Actions cache; redeploys the dashboard while games are on |
+
+GitHub cron is UTC and ignores daylight saving, so each slot is scheduled at both offsets and a gate step keeps the one that lands at the right Central time. Saturday games in December and holiday games are not in the live windows; run the workflow by hand from the Actions tab if you want live updates for those.
+
+Secrets (repo Settings > Secrets and variables > Actions): `ESPN_S2`, `SWID`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Pages: Settings > Pages > Source: GitHub Actions. When the ESPN cookie expires, update the `ESPN_S2` secret, not just `.env`.
+
+Run anything now: Actions tab > pick the workflow > Run workflow, or `gh workflow run check.yml`.
+
+With Actions live, the launchd jobs are redundant and can be unloaded (below). They are kept in the repo as a fallback.
+
 ## Sleep and shutdown
 
 The jobs are user LaunchAgents. Asleep at the scheduled time: the run fires on wake, and several missed runs collapse into one. Shut down or logged out: nothing runs until the next slot. To wake the Mac before the morning runs:

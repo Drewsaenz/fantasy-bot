@@ -14,8 +14,9 @@ body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-s
 header { padding:18px 20px 6px; display:flex; flex-wrap:wrap; gap:8px 16px; align-items:baseline; }
 header h1 { margin:0; font-size:20px; }
 header .muted { color:var(--muted); font-size:13px; }
-main { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; padding:12px 20px 32px; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:16px; padding:12px 20px 32px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; min-width:0; }
+.scroll { overflow-x:auto; }
 .card h2 { margin:0 0 2px; font-size:17px; }
 .card .sub { color:var(--muted); font-size:13px; margin-bottom:12px; }
 .score { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:10px 0 14px; padding:10px 12px; background:var(--bg); border-radius:8px; }
@@ -26,6 +27,7 @@ main { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); g
 .score .vs { color:var(--muted); font-size:12px; }
 table { width:100%; border-collapse:collapse; font-size:14px; }
 th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+td:nth-child(2) { white-space:normal; }
 th { color:var(--muted); font-weight:500; font-size:12px; }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.bench td { color:var(--muted); }
@@ -38,7 +40,7 @@ tr.me td { font-weight:600; }
 .pos, .neg { font-variant-numeric:tabular-nums; }
 .pos { color:var(--good); } .neg { color:var(--bad); }
 h3 { font-size:13px; color:var(--muted); font-weight:500; margin:16px 0 6px; text-transform:uppercase; letter-spacing:.03em; }
-svg.hist { width:100%; height:110px; display:block; }
+svg.hist { width:100%; height:auto; display:block; }
 details { margin-top:14px; }
 summary { cursor:pointer; color:var(--muted); font-size:13px; }
 pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; background:var(--bg); padding:10px 12px; border-radius:8px; margin:8px 0 0; }
@@ -86,34 +88,39 @@ def lineup_table(snap, team, bench=True):
         starters = set(p for p in team.starters if p)
         for pid in sorted((p for p in team.players if p not in starters), key=snap.pts, reverse=True):
             rows.append(player_row(snap, "BN", pid, bench=True))
-    return ('<table><thead><tr><th>Slot</th><th>Player</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>')
+    return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
 def history_svg(hist):
     if not hist:
         return '<div class="sub">No completed weeks yet.</div>'
-    w, h, pad = 100.0 / max(len(hist), 1), 100, 4
-    top = max([x["mine"] for x in hist] + [x["theirs"] or 0 for x in hist] + [1])
+    W, H, base = 600, 120, 100
+    n = len(hist)
+    slot = W / n
+    bar = min(40, slot * 0.35)
+    top = max([x["mine"] for x in hist] + [x["theirs"] or 0 for x in hist] + [1]) * 1.15
     parts = []
     for i, x in enumerate(hist):
-        x0 = i * w
-        mh = x["mine"] / top * (h - 24)
-        th = (x["theirs"] or 0) / top * (h - 24)
+        cx = i * slot + slot / 2
+        mh = x["mine"] / top * (base - 16)
+        th = (x["theirs"] or 0) / top * (base - 16)
         win = x["theirs"] is not None and x["mine"] > x["theirs"]
         color = "var(--good)" if win else "var(--bad)" if x["theirs"] is not None else "var(--muted)"
-        parts.append(f'<rect x="{x0 + pad:.1f}%" width="{w / 2 - pad:.1f}%" y="{h - 18 - mh:.1f}" height="{mh:.1f}" fill="{color}" rx="2"/>')
-        parts.append(f'<rect x="{x0 + w / 2:.1f}%" width="{w / 2 - pad:.1f}%" y="{h - 18 - th:.1f}" height="{th:.1f}" fill="var(--line)" rx="2"/>')
-        parts.append(f'<text x="{x0 + w / 2:.1f}%" y="{h - 4}" font-size="10" text-anchor="middle" fill="var(--muted)">W{x["week"]}</text>')
-        parts.append(f'<text x="{x0 + w / 2:.1f}%" y="{h - 22 - max(mh, th):.1f}" font-size="10" text-anchor="middle" fill="var(--ink)">{x["mine"]:.0f}</text>')
-    return f'<svg class="hist" viewBox="0 0 100 {h}" preserveAspectRatio="none">{"".join(parts)}</svg>'
+        parts.append(f'<rect x="{cx - bar - 2:.1f}" y="{base - mh:.1f}" width="{bar:.1f}" height="{mh:.1f}" fill="{color}" rx="3"/>')
+        parts.append(f'<rect x="{cx + 2:.1f}" y="{base - th:.1f}" width="{bar:.1f}" height="{th:.1f}" fill="var(--line)" rx="3"/>')
+        parts.append(f'<text x="{cx - bar / 2 - 2:.1f}" y="{base - mh - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--ink)">{x["mine"]:.0f}</text>')
+        if x["theirs"] is not None:
+            parts.append(f'<text x="{cx + bar / 2 + 2:.1f}" y="{base - th - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--muted)">{x["theirs"]:.0f}</text>')
+        parts.append(f'<text x="{cx:.1f}" y="{H - 4}" font-size="11" text-anchor="middle" fill="var(--muted)">Wk {x["week"]} · {esc(x["opp"])[:14]}</text>')
+    return f'<svg class="hist" viewBox="0 0 {W} {H}" role="img" aria-label="weekly scores, you vs opponent">{"".join(parts)}</svg>'
 
 
 def standings_table(st):
     rows = "".join(
         f'<tr class="{"me" if d["is_me"] else ""}"><td>{i + 1}</td><td>{esc(d["name"])}</td><td class="num">{esc(d["record"])}</td>'
         f'<td class="num">{d["pf"]:.1f}</td><td>{esc(d["extra"])}</td></tr>' for i, d in enumerate(st))
-    return f'<table><thead><tr><th>#</th><th>Team</th><th class="num">W-L</th><th class="num">PF</th><th></th></tr></thead><tbody>{rows}</tbody></table>'
+    return f'<div class="scroll"><table><thead><tr><th>#</th><th>Team</th><th class="num">W-L</th><th class="num">PF</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>'
 
 
 def league_card(snap, report_text):
