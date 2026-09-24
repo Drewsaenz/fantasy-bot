@@ -64,7 +64,7 @@ Either flag logs a warning and continues if its credentials are missing.
 open dashboard.html
 ```
 
-One self-contained page, both leagues: live score vs opponent, your lineup and bench with projected and actual points and LIVE/FINAL tags, the opponent's lineup, weekly results, standings, and the full check report folded under each card. Refreshes itself every 5 minutes. On GitHub it is rebuilt by the check and live workflows and served by GitHub Pages.
+One self-contained page, both leagues: a banner with anything the check found, live score vs opponent, your lineup and bench with each player's game (kickoff time in Central and opponent, or LIVE / Final / BYE), projected and actual points, injury tags (hover for Sleeper's injury note), upcoming-bye tags, the opponent's lineup, weekly results, standings, next week's opponent, and the full check report folded under each card. Refreshes itself every 5 minutes. On GitHub it is rebuilt by the check and live workflows and served by GitHub Pages.
 
 ## GitHub Actions (runs with the Mac off)
 
