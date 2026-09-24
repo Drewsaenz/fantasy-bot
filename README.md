@@ -1,6 +1,6 @@
 # Fantasy lineup checker
 
-Read-only checker for two leagues: TAG Fantasy Football (Sleeper, 12-team PPR) and The Austin Powers Premiere (ESPN). It reports what to change; you make the moves in the apps.
+Read-only checker for two leagues, reported in this order: The Austin Powers Premiere (ESPN) and TAG Fantasy Football (Sleeper, 12-team PPR). Change the order with `--leagues sleeper,espn`. It reports what to change; you make the moves in the apps.
 
 ## Files
 

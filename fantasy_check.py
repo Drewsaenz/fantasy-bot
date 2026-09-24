@@ -144,7 +144,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=["check", "waivers", "recap", "live", "dashboard", "watch"], default="check")
     ap.add_argument("--out", default=str(HERE / "dashboard.html"), help="dashboard mode: output HTML path")
-    ap.add_argument("--leagues", default="sleeper,espn", help="comma list: sleeper,espn")
+    ap.add_argument("--leagues", default="espn,sleeper", help="comma list, in report order: espn,sleeper")
     ap.add_argument("--week", type=int, help="NFL week (default: current)")
     ap.add_argument("--state", default=None, help="live/watch mode: where to remember the last poll (default live_state.json / watch_state.json)")
     ap.add_argument("--force", action="store_true", help="live mode: run even when no game is in progress")
