@@ -103,6 +103,7 @@ def build(mode="check", week=None) -> Snapshot:
             pts_next=proj_next.get(pid, 0.0),
             season_avg=proj_season.get(pid, 0.0) / GAMES_PER_SEASON,
             bye=bool(this_week) and team not in this_week and team != "FA",
+            note=" ".join(x for x in (p.get("injury_body_part"), p.get("injury_notes")) if x),
         )
 
     players = {}
@@ -137,7 +138,8 @@ def build(mode="check", week=None) -> Snapshot:
 
     snap = Snapshot(key="sleeper", name=league.get("name", "Sleeper"), week=week, slots=slots,
                     players=players, teams=teams, me=me, free_agents=free_agents,
-                    kickoffs={}, game_status=game_status, byes=byes)
+                    kickoffs={}, game_status=game_status, byes=byes,
+                    games={t: {"opp": g["opp"], "home": g.get("home"), "date": g.get("date")} for t, g in this_week.items()})
 
     # opponent
     try:
@@ -165,6 +167,14 @@ def build(mode="check", week=None) -> Snapshot:
                                    "pf": float(s.get("fpts", 0)) + float(s.get("fpts_decimal", 0)) / 100,
                                    "extra": "", "is_me": t.tid == me.tid})
         snap.standings.sort(key=lambda d: (-int(d["record"].split("-")[0]), -d["pf"]))
+        try:
+            ms = get(f"{BASE}/league/{league_id}/matchups/{week + 1}")
+            mm = next(m for m in ms if str(m["roster_id"]) == me.tid)
+            om = next((m for m in ms if m.get("matchup_id") == mm.get("matchup_id") and str(m["roster_id"]) != me.tid), None)
+            ot = next((t for t in teams if om and t.tid == str(om["roster_id"])), None)
+            snap.next_opp = ot.name if ot else ""
+        except (StopIteration, requests.RequestException):
+            pass
         for w in range(1, week):
             try:
                 ms = get(f"{BASE}/league/{league_id}/matchups/{w}")

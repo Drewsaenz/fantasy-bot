@@ -175,15 +175,18 @@ def main():
     # Sleeper's schedule has dates but no kickoff times; borrow ESPN's if we have them
     kick = next((s.kickoffs for s in snaps if s.kickoffs), {})
     status = next((s.game_status for s in snaps if s.game_status), {})
+    games = next((s.games for s in snaps if s.games), {})
     for snap in snaps:
         if not snap.kickoffs and kick:
             snap.kickoffs = kick
         if not snap.game_status and status:  # ESPN has no game-complete signal; Sleeper's schedule does
             snap.game_status = status
+        if not snap.games and games:
+            snap.games = games
 
     if args.mode == "dashboard":
         import dashboard
-        reports = {s.key: "\n".join(core.report_check(s)[0]) for s in snaps}
+        reports = {s.key: core.report_check(s) for s in snaps}  # (lines, issues)
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(dashboard.render(snaps, reports, failures))

@@ -37,6 +37,11 @@ tr.me td { font-weight:600; }
 .tag.warn { background:#fef3c7; color:var(--warn); }
 .tag.live { background:#dbeafe; color:var(--live); }
 .tag.final { background:#dcfce7; color:var(--good); }
+.tag.bye { background:#f3f4f6; color:var(--muted); }
+.game { color:var(--muted); font-size:12px; white-space:normal; }
+.game.live { color:var(--live); font-weight:600; }
+.issues { margin:0 0 10px; padding:8px 12px; border-radius:8px; background:#fef3c7; color:#7c2d12; font-size:13px; }
+.issues.ok { background:#dcfce7; color:#14532d; }
 .pos, .neg { font-variant-numeric:tabular-nums; }
 .pos { color:var(--good); } .neg { color:var(--bad); }
 h3 { font-size:13px; color:var(--muted); font-weight:500; margin:16px 0 6px; text-transform:uppercase; letter-spacing:.03em; }
@@ -58,27 +63,49 @@ def signed(x):
     return f'<span class="{cls}">{x:+.1f}</span>'
 
 
-def player_row(snap, slot, pid, bench=False):
-    if not pid:
-        return f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td colspan="4" class="neg">EMPTY</td></tr>'
+def game_cell(snap, pid):
+    """When and who: 'Sun 12:00 PM vs LAC', 'LIVE @ BUF', 'Final vs NYJ', 'BYE'."""
     p = snap.p(pid)
-    tags = ""
-    if p.status in core.BAD_STATUSES:
-        tags += f'<span class="tag bad">{esc(p.status)}</span>'
-    elif p.status:
-        tags += f'<span class="tag warn">{esc(p.status)}</span>'
     if p.bye:
-        tags += '<span class="tag bad">BYE</span>'
+        return '<span class="game">BYE</span>'
+    g = snap.games.get(p.team, {})
+    opp = g.get("opp")
+    vs = ("vs\u00a0" if g.get("home") else "@\u00a0") + opp if opp else ""
     gs = core.game_state(snap, pid)
     if gs == "live":
-        tags += '<span class="tag live">LIVE</span>'
-    elif gs == "final":
-        tags += '<span class="tag final">FINAL</span>'
+        return f'<span class="game live">LIVE {esc(vs)}</span>'
+    if gs == "final":
+        return f'<span class="game">Final {esc(vs)}</span>'
+    ko = snap.kickoffs.get(p.team)
+    if ko:
+        when = (ko.astimezone(LOCAL_TZ) if ko.tzinfo else ko).strftime("%a\u00a0%-I:%M\u00a0%p")
+    elif g.get("date"):
+        when = datetime.strptime(g["date"], "%Y-%m-%d").strftime("%a")
+    else:
+        when = ""
+    return f'<span class="game">{esc((when + " " + vs).strip())}</span>'
+
+
+def player_row(snap, slot, pid, bench=False):
+    if not pid:
+        return f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td colspan="5" class="neg">EMPTY</td></tr>'
+    p = snap.p(pid)
+    tags = ""
+    title = f' title="{esc(p.note)}"' if p.note else ""
+    if p.status in core.BAD_STATUSES:
+        tags += f'<span class="tag bad"{title}>{esc(p.status)}</span>'
+    elif p.status:
+        tags += f'<span class="tag warn"{title}>{esc(p.status)}</span>'
+    if p.bye:
+        tags += '<span class="tag bad">BYE</span>'
+    elif snap.byes.get(p.team):
+        tags += f'<span class="tag bye">bye wk {snap.byes[p.team]}</span>'
+    gs = core.game_state(snap, pid)
     actual = p.actual if (p.actual is not None and gs != "pre") else None
     act_html = f"{actual:.1f}" if actual is not None else '<span style="color:var(--muted)">–</span>'
     diff_html = signed(actual - p.pts) if actual is not None and gs == "final" else ""
     name = f"{p.team} D/ST" if p.pos == "DEF" else f"{p.name} <span style='color:var(--muted)'>{p.pos}-{p.team}</span>"
-    return (f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td>{name}{tags}</td>'
+    return (f'<tr class="{"bench" if bench else ""}"><td>{esc(slot)}</td><td>{name}{tags}</td><td>{game_cell(snap, pid)}</td>'
             f'<td class="num">{p.pts:.1f}</td><td class="num">{act_html}</td><td class="num">{diff_html}</td></tr>')
 
 
@@ -88,7 +115,7 @@ def lineup_table(snap, team, bench=True):
         starters = set(p for p in team.starters if p)
         for pid in sorted((p for p in team.players if p not in starters), key=snap.pts, reverse=True):
             rows.append(player_row(snap, "BN", pid, bench=True))
-    return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
+    return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th>Game</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
@@ -123,7 +150,8 @@ def standings_table(st):
     return f'<div class="scroll"><table><thead><tr><th>#</th><th>Team</th><th class="num">W-L</th><th class="num">PF</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>'
 
 
-def league_card(snap, report_text):
+def league_card(snap, report):
+    report_text, issues = ("\n".join(report[0]), report[1]) if report else ("", [])
     act = lambda pid: (snap.p(pid).actual or 0.0) if pid and core.game_state(snap, pid) != "pre" else 0.0  # noqa: E731
     my_act, my_proj = core.total(snap, snap.me.starters, key=act), core.total(snap, snap.me.starters)
     opp = snap.opp
@@ -133,7 +161,13 @@ def league_card(snap, report_text):
     sub = f"{esc(snap.me.name)} · {esc(snap.me.record)}" + (f" · {esc(snap.me.extra)}" if snap.me.extra else "")
     if me_st:
         sub += f" · #{snap.standings.index(me_st) + 1} of {len(snap.standings)}"
+    if snap.next_opp:
+        sub += f" · next: {esc(snap.next_opp)}"
     parts = [f'<section class="card"><h2>{esc(snap.name)}</h2><div class="sub">{sub} · Week {snap.week}</div>']
+    if issues:
+        parts.append(f'<div class="issues">⚠️ {esc(", ".join(issues))}. Details in the report below.</div>')
+    else:
+        parts.append('<div class="issues ok">✅ Lineup is set. Nothing to fix right now.</div>')
     parts.append(
         '<div class="score">'
         f'<div class="side"><div class="big">{my_act:.1f}</div><div class="proj">you · proj {my_proj:.1f}</div></div>'
@@ -154,7 +188,7 @@ def league_card(snap, report_text):
 
 def render(snaps, reports, failures=()):
     now = datetime.now(LOCAL_TZ)
-    cards = "".join(league_card(s, reports.get(s.key, "")) for s in snaps)
+    cards = "".join(league_card(s, reports.get(s.key)) for s in snaps)
     cross = core.section_exposure(snaps) + core.section_projection_gaps(snaps)
     extra = ""
     if cross:

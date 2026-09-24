@@ -39,6 +39,7 @@ class Player:
     actual: Optional[float] = None    # actual points (recap)
     bye: bool = False                 # on bye this week
     owned_pct: Optional[float] = None
+    note: str = ""                    # injury detail when the platform has it
 
     def positions(self):
         return {self.pos}
@@ -68,6 +69,8 @@ class Snapshot:
     kickoffs: dict = field(default_factory=dict)      # team -> datetime or None
     game_status: dict = field(default_factory=dict)   # team -> pre_game / in_game / complete / bye
     byes: dict = field(default_factory=dict)          # team -> next bye week within lookahead
+    games: dict = field(default_factory=dict)         # team -> {opp, home, date} this week
+    next_opp: str = ""                                # next week's opponent (dashboard)
     # recap (last week)
     last_week: Optional[int] = None
     last_starters: list = field(default_factory=list)   # pids
@@ -93,7 +96,7 @@ class Snapshot:
         team = self.p(pid).team
         ko = self.kickoffs.get(team)
         if ko:
-            return (now or datetime.now()) >= ko
+            return (now or _now(ko)) >= ko
         return self.game_status.get(team) in ("in_game", "complete")
 
     def label(self, pid):
@@ -107,6 +110,11 @@ class Snapshot:
         tags = "".join(f" [{t}]" for t in (p.status, "BYE" if p.bye else None, "LOCKED" if self.locked(pid) else None) if t)
         val = key(pid) if key else p.pts
         return f"{self.label(pid)}{tags} {val:.1f}"
+
+
+def _now(like=None):
+    """Current time, timezone-aware when the datetime we compare against is."""
+    return datetime.now(like.tzinfo) if like is not None and like.tzinfo else datetime.now()
 
 
 # ---------- lineup math ----------
@@ -525,7 +533,7 @@ def game_state(snap: Snapshot, pid, now=None):
     if st and st != "pre_game":
         return "live"
     ko = snap.kickoffs.get(team)
-    if ko and (now or datetime.now()) >= ko:
+    if ko and (now or _now(ko)) >= ko:
         return "live"
     return "pre"
 

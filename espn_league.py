@@ -171,6 +171,8 @@ def build(mode="check", week=None) -> Snapshot:
                                    "extra": team.extra, "is_me": team.tid == me.tid})
         snap.standings.sort(key=lambda d: (-int(d["record"].split("-")[0]), -d["pf"]))
         mine_t = next(t for t in lg.teams if t.team_id == team_id)
+        if len(mine_t.schedule) > week:
+            snap.next_opp = getattr(mine_t.schedule[week], "team_name", "")
         for i in range(min(week - 1, len(mine_t.scores))):
             opp_t = mine_t.schedule[i] if i < len(mine_t.schedule) else None
             opp_scores = getattr(opp_t, "scores", [])

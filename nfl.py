@@ -1,6 +1,6 @@
 """NFL schedule helpers shared by both adapters: game status, kickoff times, byes."""
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -23,8 +23,8 @@ def sleeper_schedule(season):
     for g in games or []:
         w = int(g.get("week") or 0)
         home, away = norm_team(g.get("home")), norm_team(g.get("away"))
-        for t, o in ((home, away), (away, home)):
-            out.setdefault(w, {})[t] = {"opp": o, "status": g.get("status"), "date": g.get("date")}
+        for t, o, is_home in ((home, away, True), (away, home, False)):
+            out.setdefault(w, {})[t] = {"opp": o, "home": is_home, "status": g.get("status"), "date": g.get("date")}
     return out
 
 
@@ -53,7 +53,7 @@ def espn_kickoffs(league, week):
     for tid, (opp, ms) in sched.items():
         abbr = norm_team(PRO_TEAM_MAP.get(int(tid)))
         if abbr and ms:
-            out[abbr] = datetime.fromtimestamp(ms / 1000.0)
+            out[abbr] = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)  # aware, so it renders right on any host
     return out
 
 
