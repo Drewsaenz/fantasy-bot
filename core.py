@@ -168,8 +168,9 @@ def total(snap: Snapshot, lineup, key=None):
     return sum(key(p) for p in lineup if p)
 
 
-def plural(n, word):
-    return f"{n} {word}" + ("" if n == 1 else "s")
+def plural(n, word, suffix=""):
+    """Pluralize the head noun, not the tail: plural(2, "dropped player", " worth a look")."""
+    return f"{n} {word}" + ("" if n == 1 else "s") + suffix
 
 
 # ---------- check-mode sections ----------
@@ -355,7 +356,7 @@ def section_moves(snap: Snapshot, hours=MOVES_HOURS):
     if other:
         lines.append(f"  {other} other move{'s' if other != 1 else ''} around the league")
     if notable:
-        issues.append(plural(len(notable), "dropped player worth a look"))
+        issues.append(plural(len(notable), "dropped player", " worth a look"))
     return lines + [""], issues
 
 

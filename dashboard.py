@@ -1,61 +1,95 @@
 """Self-contained HTML dashboard for both leagues. No external assets, works as a local file or on GitHub Pages."""
 import html
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import core
 
 LOCAL_TZ = ZoneInfo("America/Chicago")
 
+# Football, shaped to still read at 16px: fat oval, one lace bar, heavy strokes.
+ICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect width='64' height='64' rx='14' fill='#1c1e21'/>"
+    "<g transform='rotate(-35 32 32)'>"
+    "<ellipse cx='32' cy='32' rx='28' ry='17' fill='#b8571f'/>"
+    "<path d='M8 32 H56' stroke='#f6f7f9' stroke-width='4' stroke-linecap='round'/>"
+    "<g stroke='#f6f7f9' stroke-width='4' stroke-linecap='round'>"
+    "<path d='M22 26 V38'/><path d='M32 25 V39'/><path d='M42 26 V38'/>"
+    "</g></g></svg>"
+)
+FAVICON = "data:image/svg+xml," + quote(ICON_SVG, safe="")
+
 CSS = """
-:root { --bg:#f6f7f9; --card:#fff; --ink:#1c1e21; --muted:#6b7280; --line:#e5e7eb; --good:#15803d; --bad:#b91c1c; --warn:#b45309; --live:#2563eb; }
+:root {
+  color-scheme:light dark;
+  --bg:#f4f5f7; --card:#fff; --ink:#15171a; --muted:#6b7280; --line:#e4e6ea; --rule:#eceef1;
+  --good:#15803d; --bad:#b91c1c; --warn:#b45309; --live:#1d4ed8;
+  --good-bg:#dcfce7; --bad-bg:#fee2e2; --warn-bg:#fef3c7; --live-bg:#eaf1ff; --chip:#eef0f3;
+  --good-ink:#14532d; --warn-ink:#7c2d12;
+  --shadow:0 1px 2px rgba(16,20,28,.05);
+}
+@media (prefers-color-scheme:dark) {
+  :root {
+    --bg:#0f1115; --card:#171a20; --ink:#e8eaee; --muted:#9aa2ae; --line:#272c34; --rule:#22262d;
+    --good:#4ade80; --bad:#f87171; --warn:#fbbf24; --live:#7aa7ff;
+    --good-bg:#12291c; --bad-bg:#2c1618; --warn-bg:#2b2010; --live-bg:#151e33; --chip:#232830;
+    --good-ink:#a7f3c4; --warn-ink:#fcd9a8;
+    --shadow:none;
+  }
+}
 * { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
-header { padding:18px 20px 6px; display:flex; flex-wrap:wrap; gap:8px 16px; align-items:baseline; }
-header h1 { margin:0; font-size:20px; }
-header .muted { color:var(--muted); font-size:13px; }
-main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:16px; padding:12px 20px 32px; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; min-width:0; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; -webkit-text-size-adjust:100%; }
+header { position:sticky; top:0; z-index:5; padding:14px 20px 12px; display:flex; flex-wrap:wrap; gap:4px 14px; align-items:baseline;
+         background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid var(--line); }
+header h1 { margin:0; font-size:17px; font-weight:650; letter-spacing:-.01em; }
+header .muted { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
+main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:16px; padding:16px 20px 40px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; min-width:0; box-shadow:var(--shadow); }
 .scroll { overflow-x:auto; }
-.card h2 { margin:0 0 2px; font-size:17px; }
+.card h2 { margin:0 0 2px; font-size:17px; letter-spacing:-.01em; }
 .card .sub { color:var(--muted); font-size:13px; margin-bottom:12px; }
-.score { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:10px 0 14px; padding:10px 12px; background:var(--bg); border-radius:8px; }
-.score .side { flex:1; }
+.score { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:10px 0 14px; padding:12px 14px; background:var(--bg); border-radius:10px; }
+.score .side { flex:1; min-width:0; }
 .score .side.them { text-align:right; }
-.score .big { font-size:26px; font-weight:600; }
+.score .big { font-size:28px; font-weight:640; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.score .side.lead .big { color:var(--good); }
 .score .proj { color:var(--muted); font-size:12px; }
-.score .vs { color:var(--muted); font-size:12px; }
+.score .vs { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
 table { width:100%; border-collapse:collapse; font-size:14px; }
-th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; }
+tbody tr:last-child td { border-bottom:0; }
 td:nth-child(2) { white-space:normal; }
-th { color:var(--muted); font-weight:500; font-size:12px; }
+th { color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom-color:var(--line); }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.bench td { color:var(--muted); }
-tr.live td { background:#eff6ff; }
+tr.live td { background:var(--live-bg); }
 tr.live td.num.pts { color:var(--live); font-weight:600; }
 tr.done td { color:var(--muted); }
 tr.done td:nth-child(2) { color:var(--ink); }
 tr.me td { font-weight:600; }
-.tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:999px; background:var(--line); color:var(--ink); margin-left:4px; vertical-align:middle; }
-.tag.bad { background:#fee2e2; color:var(--bad); }
-.tag.warn { background:#fef3c7; color:var(--warn); }
-.tag.live { background:#dbeafe; color:var(--live); }
-.tag.final { background:#dcfce7; color:var(--good); }
-.tag.bye { background:#f3f4f6; color:var(--muted); }
+.tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:999px; background:var(--chip); color:var(--ink); margin-left:4px; vertical-align:middle; }
+.tag.bad { background:var(--bad-bg); color:var(--bad); }
+.tag.warn { background:var(--warn-bg); color:var(--warn); }
+.tag.live { background:var(--live-bg); color:var(--live); }
+.tag.final { background:var(--good-bg); color:var(--good); }
+.tag.bye { background:var(--chip); color:var(--muted); }
 .game { color:var(--muted); font-size:12px; white-space:normal; }
 svg.spark { width:56px; height:18px; display:block; }
 .game.live { color:var(--live); font-weight:600; }
-.issues { margin:0 0 10px; padding:8px 12px; border-radius:8px; background:#fef3c7; color:#7c2d12; font-size:13px; }
-.issues.ok { background:#dcfce7; color:#14532d; }
+.issues { margin:0 0 10px; padding:8px 12px; border-radius:8px; background:var(--warn-bg); color:var(--warn-ink); font-size:13px; }
+.issues.ok { background:var(--good-bg); color:var(--good-ink); }
 .pos, .neg { font-variant-numeric:tabular-nums; }
 .pos { color:var(--good); } .neg { color:var(--bad); }
-h3 { font-size:13px; color:var(--muted); font-weight:500; margin:16px 0 6px; text-transform:uppercase; letter-spacing:.03em; }
+h3 { font-size:11px; color:var(--muted); font-weight:600; margin:18px 0 6px; text-transform:uppercase; letter-spacing:.07em; }
 svg.hist { width:100%; height:auto; display:block; }
 details { margin-top:14px; }
 summary { cursor:pointer; color:var(--muted); font-size:13px; }
+summary:focus-visible { outline:2px solid var(--live); outline-offset:2px; border-radius:4px; }
 pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; background:var(--bg); padding:10px 12px; border-radius:8px; margin:8px 0 0; }
 .wide { grid-column:1 / -1; }
-@media (max-width:480px) { main, header { padding-left:12px; padding-right:12px; } .card { padding:14px; } }
+@media (max-width:480px) { main, header { padding-left:12px; padding-right:12px; } .card { padding:14px; } .score .big { font-size:24px; } }
 """
 
 
@@ -151,10 +185,10 @@ def lineup_table(snap, team, bench=True):
 def history_svg(hist):
     if not hist:
         return '<div class="sub">No completed weeks yet.</div>'
-    W, H, base = 600, 120, 100
     n = len(hist)
-    slot = W / n
-    bar = min(40, slot * 0.35)
+    slot, H, base = 110, 124, 94  # fixed per-week width, so two played weeks don't stretch across the card
+    W = n * slot
+    bar = min(28, slot * 0.35)
     top = max([x["mine"] for x in hist] + [x["theirs"] or 0 for x in hist] + [1]) * 1.15
     parts = []
     for i, x in enumerate(hist):
@@ -168,8 +202,10 @@ def history_svg(hist):
         parts.append(f'<text x="{cx - bar / 2 - 2:.1f}" y="{base - mh - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--ink)">{x["mine"]:.0f}</text>')
         if x["theirs"] is not None:
             parts.append(f'<text x="{cx + bar / 2 + 2:.1f}" y="{base - th - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--muted)">{x["theirs"]:.0f}</text>')
-        parts.append(f'<text x="{cx:.1f}" y="{H - 4}" font-size="11" text-anchor="middle" fill="var(--muted)">Wk {x["week"]} · {esc(x["opp"])[:14]}</text>')
-    return f'<svg class="hist" viewBox="0 0 {W} {H}" role="img" aria-label="weekly scores, you vs opponent">{"".join(parts)}</svg>'
+        parts.append(f'<text x="{cx:.1f}" y="{H - 16}" font-size="11" text-anchor="middle" fill="var(--ink)">Wk {x["week"]}</text>')
+        parts.append(f'<text x="{cx:.1f}" y="{H - 4}" font-size="9.5" text-anchor="middle" fill="var(--muted)">{esc(x["opp"])[:14]}</text>')
+    return (f'<svg class="hist" style="max-width:{W}px" viewBox="0 0 {W} {H}" role="img"'
+            f' aria-label="weekly scores, you vs opponent">{"".join(parts)}</svg>')
 
 
 def standings_table(st):
@@ -225,11 +261,19 @@ def league_card(snap, report):
         left = sum(1 for pid in team.starters if pid and core.game_state(snap, pid) == "pre")
         bits = ([f"{n} playing"] if n else []) + ([f"{left} to play"] if left else [])
         return (" · " + ", ".join(bits)) if bits else " · all done"
+    started = any(pid and core.game_state(snap, pid) != "pre"
+                  for t in (snap.me, opp) if t for pid in t.starters)
+    # Before kickoff the actuals are all 0.0, which reads as a scoreline that hasn't happened; show projections instead.
+    my_big, opp_big = (my_act, opp_act) if started else (my_proj, opp_proj)
+    my_sub = f"you · proj {my_proj:.1f}" if started else "you · projected"
+    opp_sub = (f"{esc(opp.name)} · proj {opp_proj:.1f}" if started else f"{esc(opp.name)} · projected") if opp else "no matchup"
+    lead = " lead" if opp and my_big > opp_big else ""
+    them_lead = " lead" if opp and opp_big > my_big else ""
     parts.append(
         '<div class="score">'
-        f'<div class="side"><div class="big">{my_act:.1f}</div><div class="proj">you · proj {my_proj:.1f}{playing(snap.me)}</div></div>'
+        f'<div class="side{lead}"><div class="big">{my_big:.1f}</div><div class="proj">{my_sub}{playing(snap.me)}</div></div>'
         '<div class="vs">vs</div>'
-        f'<div class="side them"><div class="big">{opp_act:.1f}</div><div class="proj">{esc(opp.name) if opp else "no matchup"} · proj {opp_proj:.1f}{playing(opp)}</div></div>'
+        f'<div class="side them{them_lead}"><div class="big">{opp_big:.1f}</div><div class="proj">{opp_sub}{playing(opp)}</div></div>'
         '</div>')
     parts.append(lineup_table(snap, snap.me))
     if opp:
@@ -255,6 +299,10 @@ def render(snaps, reports, failures=()):
         extra += f'<section class="card wide"><h2>Problem</h2><div class="neg">{esc(f)}</div></section>'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="300"><title>Fantasy dashboard</title><style>{CSS}</style></head>
+<meta http-equiv="refresh" content="300"><meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-title" content="Fantasy"><title>Fantasy dashboard</title>
+<link rel="icon" href="{FAVICON}"><link rel="apple-touch-icon" href="{FAVICON}"><style>{CSS}</style></head>
 <body><header><h1>Fantasy dashboard</h1><span class="muted">updated {now.strftime("%a %b %-d, %-I:%M %p")} Central · refreshes every 5 min</span></header>
 <main>{cards}{extra}</main></body></html>"""
