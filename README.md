@@ -35,7 +35,7 @@ Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 6. Across leagues: players on both rosters, and players where Sleeper and ESPN projections differ by 3 or more (K and D/ST excluded, their scoring differs).
 
 **waivers** (Tue 8 PM, before waivers process overnight)
-- Top three free agents per position by next-week projection and season average, with ESPN ownership where available. "claim" means it beats both your drop candidate and your worst player at that position by 1.5 on a blended value (60% season average, 40% next week).
+- Top three free agents per position by projection for the week the claim would play (this coming week on waiver night, since claims process overnight) and season average, with ESPN ownership where available. "claim" means it beats both your drop candidate and your worst player at that position by 1.5 on a blended value (60% season average, 40% next week).
 - Trade ideas: your depth vs league average at QB / RB / WR / TE, and the teams whose surplus matches your need.
 - Upcoming byes.
 

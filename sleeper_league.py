@@ -66,10 +66,13 @@ def team_label(owner, roster_id):
 
 
 def current_week(state):
-    dw, w = state.get("display_week"), state.get("week")
-    if dw and w and dw != w:
-        print(f"note: Sleeper state week={w} display_week={dw}; using {dw}", file=sys.stderr)
-    return dw or w
+    """The week to set lineups for. Sleeper's display_week lags behind `week` on Tuesday and
+    Wednesday, while the just-finished week is still the one its app shows, so `week` is the one
+    that matches ESPN's current_week and keeps the recap on the week that actually just ended."""
+    w, dw = state.get("week"), state.get("display_week")
+    if w and dw and w != dw:
+        print(f"note: Sleeper state week={w} display_week={dw}; using {w}", file=sys.stderr)
+    return w or dw
 
 
 def build(mode="check", week=None) -> Snapshot:
@@ -96,7 +99,10 @@ def build(mode="check", week=None) -> Snapshot:
     fresh_status = {}
     proj = load_projections(season, week, key, status_out=fresh_status)
     want_next = mode in ("waivers", "dashboard")
-    proj_next = load_projections(season, week + 1, key) if want_next else {}
+    # A claim made now plays this week on waiver night (claims process overnight) and next week
+    # any other day, which is when the dashboard is read.
+    claim_week = week if mode == "waivers" else week + 1
+    proj_next = load_projections(season, claim_week, key) if want_next else {}
     proj_season = load_projections(season, None, key) if want_next else {}
 
     sched = sleeper_schedule(season)
@@ -150,7 +156,7 @@ def build(mode="check", week=None) -> Snapshot:
     for pid in free_agents:
         players[pid] = mk(pid)
 
-    snap = Snapshot(key="sleeper", name=league.get("name", "Sleeper"), week=week, slots=slots,
+    snap = Snapshot(key="sleeper", name=league.get("name", "Sleeper"), week=week, claim_week=claim_week, slots=slots,
                     players=players, teams=teams, me=me, free_agents=free_agents,
                     kickoffs={}, game_status=game_status, byes=byes,
                     games={t: {"opp": g["opp"], "home": g.get("home"), "date": g.get("date")} for t, g in this_week.items()})

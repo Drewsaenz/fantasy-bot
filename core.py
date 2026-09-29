@@ -76,6 +76,7 @@ class Snapshot:
     games: dict = field(default_factory=dict)         # team -> {opp, home, date} this week
     moves: list = field(default_factory=list)         # league transactions: dicts ts, team, action, pid, mine, status, bid
     next_opp: str = ""                                # next week's opponent (dashboard)
+    claim_week: Optional[int] = None                  # week a waiver claim made now would play
     # recap (last week)
     last_week: Optional[int] = None
     last_starters: list = field(default_factory=list)   # pids
@@ -420,12 +421,13 @@ def waiver_targets(snap: Snapshot, per_pos=3):
 
 
 def section_waivers(snap: Snapshot):
-    lines, issues = [f"*{snap.name} - Week {snap.week + 1} waiver targets*", ""], []
+    cw = snap.claim_week or snap.week + 1
+    lines, issues = [f"*{snap.name} - Week {cw} waiver targets*", ""], []
     drop, rows = waiver_targets(snap)
     if not drop:
         return lines + ["No bench players to drop."], issues
     d = snap.p(drop)
-    lines.append(f"Drop candidate: {snap.label(drop)} (season avg {d.season_avg:.1f}, next week {d.pts_next:.1f})")
+    lines.append(f"Drop candidate: {snap.label(drop)} (season avg {d.season_avg:.1f}, wk {cw} {d.pts_next:.1f})")
     lines.append("")
     claims = 0
     for pos in POSITIONS:
@@ -439,7 +441,7 @@ def section_waivers(snap: Snapshot):
             byew = snap.byes.get(p.team)
             bye = f", bye wk {byew}" if byew else ""
             flag = " ⬆️ claim" if r["claim"] else ""
-            lines.append(f"  - {snap.label(r['pid'])}: next wk {p.pts_next:.1f}, season avg {p.season_avg:.1f}{own}{bye}{flag}")
+            lines.append(f"  - {snap.label(r['pid'])}: wk {cw} {p.pts_next:.1f}, season avg {p.season_avg:.1f}{own}{bye}{flag}")
             claims += r["claim"]
     if claims:
         issues.append(plural(claims, "waiver target"))

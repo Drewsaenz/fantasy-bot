@@ -65,6 +65,9 @@ def build(mode="check", week=None) -> Snapshot:
         raise RuntimeError(f"ESPN refused the cookies ({e}). Grab fresh espn_s2 and SWID from the browser.") from e
 
     week = week or lg.current_week
+    # A claim made now plays this week on waiver night (claims process overnight) and next
+    # week any other day, which is when the dashboard is read.
+    claim_week = week if mode == "waivers" else week + 1
     slots = []
     for name, n in lg.settings.position_slot_counts.items():
         s = slot(name)
@@ -119,7 +122,7 @@ def build(mode="check", week=None) -> Snapshot:
             return box.away_lineup, box.home_team, box.home_lineup
         return None
 
-    snap = Snapshot(key="espn", name=lg.settings.name, week=week, slots=slots, players=players,
+    snap = Snapshot(key="espn", name=lg.settings.name, week=week, claim_week=claim_week, slots=slots, players=players,
                     teams=teams, me=me, kickoffs=kickoffs, byes=byes)
 
     boxes = lg.box_scores(week)
@@ -135,10 +138,10 @@ def build(mode="check", week=None) -> Snapshot:
         snap.warnings.append(f"ESPN: no box score for week {week} (bye week or playoffs?)")
         me.starters = [None] * len(slots)
 
-    # free agents: this week's projection for check, next week's for waivers.
+    # free agents: this week's projection for check, the claim week's for waivers.
     # ESPN's K and D/ST queries return rostered players too, so filter against the rosters we just read.
     rostered = {pid for t in teams for pid in t.players} | {pid for t in teams for pid in t.starters if pid}
-    fa_weeks = [week + 1] if mode == "waivers" else [week, week + 1] if mode == "dashboard" else [week]
+    fa_weeks = [claim_week] if mode == "waivers" else [week, claim_week] if mode == "dashboard" else [week]
     for fa_week in fa_weeks:
         for pos in POSITIONS:
             try:
@@ -150,7 +153,7 @@ def build(mode="check", week=None) -> Snapshot:
                 if str(p.playerId) in rostered or getattr(p, "onTeamId", 0):
                     continue
                 cp = mk(p, week, pts=p.projected_points)
-                if fa_week != week:
+                if fa_week == claim_week:
                     cp.pts_next, cp.pts = cp.pts, 0.0
                 prev = players.get(cp.pid)
                 if prev and cp.pid in snap.free_agents:  # seen for the other week: merge
@@ -161,15 +164,15 @@ def build(mode="check", week=None) -> Snapshot:
                 snap.free_agents.append(cp.pid)
 
     if mode in ("waivers", "dashboard"):
-        # next-week projections for rostered players come from reloading rosters for that scoring period
+        # claim-week projections for rostered players come from reloading rosters for that scoring period
         try:
-            lg.load_roster_week(week + 1)
+            lg.load_roster_week(claim_week)
             for t in lg.teams:
                 for p in t.roster:
                     if str(p.playerId) in players:
-                        players[str(p.playerId)].pts_next = week_proj(p, week + 1)
+                        players[str(p.playerId)].pts_next = week_proj(p, claim_week)
         except Exception as e:  # noqa: BLE001
-            print(f"warning: ESPN next-week roster load failed: {e}", file=sys.stderr)
+            print(f"warning: ESPN claim-week roster load failed: {e}", file=sys.stderr)
 
     if mode in ("check", "dashboard"):
         try:
