@@ -3,14 +3,16 @@ name: check
 on:
   workflow_dispatch:
   schedule:
-    # Central time slots. GitHub cron is UTC, so each slot is listed for both CDT (UTC-5) and CST (UTC-6);
-    # the gate step keeps only the run that lands in the right local window.
-    - cron: "0 13,14 * * 3"   # Wed 8:00 AM  (after waivers)
-    - cron: "0 21,22 * * 4"   # Thu 4:00 PM  (before TNF)
-    - cron: "0 15,16 * * 0"   # Sun 10:00 AM (injury check)
-    - cron: "30 16,17 * * 0"  # Sun 11:30 AM (last inactives)
-    - cron: "30 23 * * 0"     # Sun 6:30 PM CDT
-    - cron: "30 0 * * 1"      # Sun 6:30 PM CST
+    # GitHub delivers scheduled runs late (hours, on a busy day) and sometimes drops one outright,
+    # so every Central-time slot gets a wide firing window covering both DST offsets plus the
+    # lateness budget below. slot_gate.sh picks the slot that is actually due; the cache lock keeps
+    # the extra firings from sending twice. The last hour of each window is what catches a slot that
+    # never went out at all and warns about it.
+    - cron: "0 13-18 * * 3"     # Wed 8:00 AM Central (after waivers)
+    - cron: "0 21-23 * * 4"     # Thu 4:00 PM Central (before TNF)
+    - cron: "0 0-2 * * 5"       #   ... the CST tail of the Thursday window
+    - cron: "0,30 15-23 * * 0"  # Sun 10:00 AM, 11:30 AM, 6:30 PM Central
+    - cron: "0,30 0-5 * * 1"    #   ... the CST tail of the Sunday window
 
 permissions:
   contents: read
@@ -28,30 +30,39 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - id: gate
-        name: Is it one of the scheduled Central-time slots?
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then echo run=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          now=$(TZ=America/Chicago date +%u-%H:%M)   # 1=Mon .. 7=Sun
-          case "$now" in
-            3-08:[0-2]*|4-16:[0-2]*|7-10:[0-2]*|7-11:[3-5]*|7-18:[3-5]*) echo run=true >> "$GITHUB_OUTPUT" ;;
-            *) echo "skip: $now Central is the other DST offset"; echo run=false >> "$GITHUB_OUTPUT" ;;
-          esac
+      - uses: actions/checkout@v4
 
-      - if: steps.gate.outputs.run == 'true'
-        uses: actions/checkout@v4
-      - if: steps.gate.outputs.run == 'true'
+      - id: gate
+        name: Is a Central-time slot due?
+        # Four hours: past that a lineup check is advising on a lineup that has already locked.
+        env:
+          MAX_LATE_MIN: 240
+        run: bash tools/slot_gate.sh 3-0800 4-1600 0-1000 0-1130 0-1830
+
+      - if: steps.gate.outputs.slot != ''
+        id: lock
+        name: Has this slot already been handled?
+        uses: actions/cache/restore@v4
+        with:
+          path: .slot
+          key: sent-check-${{ steps.gate.outputs.slot }}
+
+      - id: go
+        if: steps.gate.outputs.run == 'true' && steps.lock.outputs.cache-hit != 'true'
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.go.outputs.ok == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         run: pip install -r requirements.txt
 
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         id: date
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         id: players
         name: Sleeper player list (5 MB, fetched at most once a day)
         uses: actions/cache@v4
@@ -59,7 +70,7 @@ jobs:
           path: .cache
           key: players-${{ steps.date.outputs.today }}
 
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         name: Lineup check to Telegram
         run: python fantasy_check.py --mode check --telegram
         env:
@@ -69,17 +80,43 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - if: steps.gate.outputs.run == 'true'
+      # Silence is what went unnoticed for four days, so say something rather than nothing.
+      - if: steps.gate.outputs.stale == 'true' && steps.lock.outputs.cache-hit != 'true'
+        id: warn
+        name: Warn that this slot never went out
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLOT: ${{ steps.gate.outputs.slot }}
+          RUNS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/check.yml
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=⚠️ No lineup check went out for $SLOT. GitHub ran the job too late for it to be worth sending. Run it by hand: $RUNS_URL"
+
+      # Only after the send succeeded: a failed post leaves the lock open so the next firing retries.
+      - if: steps.go.outputs.ok == 'true' || steps.warn.outcome == 'success'
+        name: Mark this slot handled
+        run: mkdir -p .slot && date -u +%FT%TZ > .slot/sent
+      - if: steps.go.outputs.ok == 'true' || steps.warn.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .slot
+          key: sent-check-${{ steps.gate.outputs.slot }}
+
+      - if: steps.go.outputs.ok == 'true'
         name: Build dashboard
         run: python fantasy_check.py --mode dashboard --out site/index.html
         env:
           SLEEPER_CACHE_DIR: .cache
           ESPN_S2: ${{ secrets.ESPN_S2 }}
           SWID: ${{ secrets.SWID }}
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
-      - if: steps.gate.outputs.run == 'true'
+      - if: steps.go.outputs.ok == 'true'
         id: deploy
         uses: actions/deploy-pages@v4

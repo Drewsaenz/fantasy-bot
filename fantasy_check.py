@@ -258,15 +258,19 @@ def main():
         if failures:
             notify(f"{title} failed", failures[0][:200])
 
+    # A post that never arrived has to be loud: the scheduled jobs are the only thing watching, and
+    # a green run with no Telegram message looks identical to a quiet week.
+    post_failed = False
     for flag, fn, label in ((args.telegram, post_telegram, "Telegram"), (args.slack, post_slack, "Slack")):
         if flag:
             try:
                 fn(report)
             except requests.RequestException as e:
-                print(f"warning: {label} post failed: {e}", file=sys.stderr)
+                print(f"error: {label} post failed: {e}", file=sys.stderr)
+                post_failed = True
                 if args.notify:
                     notify(f"{label} post failed", str(e)[:200])
-    sys.exit(1 if failures and not snaps else 0)
+    sys.exit(1 if post_failed or (failures and not snaps) else 0)
 
 
 if __name__ == "__main__":
