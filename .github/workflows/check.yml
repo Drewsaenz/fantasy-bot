@@ -8,10 +8,13 @@ on:
     # which Central-time slot the run is standing in for. The cache lock keeps the extra firings from
     # sending twice, and a firing that arrives past a slot's budget warns instead of staying silent.
     # Hourly also means no separate CDT/CST windows to keep in sync.
-    - cron: "0 * * * *"
-    # The half-hour slots (Sun 11:30 AM and 6:30 PM Central) need a firing on the half hour too.
-    - cron: "30 16-23 * * 0"
-    - cron: "30 0-2 * * 1"
+    #
+    # Minute 17, not 0: GitHub queues every repo's scheduled runs together, and the top of the hour
+    # is when the whole platform's crons pile up, so :00 is the slowest minute to be delivered.
+    - cron: "17 * * * *"
+    # The half-hour slots (Sun 11:30 AM and 6:30 PM Central) need a second firing past the half hour.
+    - cron: "47 16-23 * * 0"
+    - cron: "47 0-2 * * 1"
 
 permissions:
   contents: read
