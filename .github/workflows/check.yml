@@ -4,15 +4,14 @@ on:
   workflow_dispatch:
   schedule:
     # GitHub delivers scheduled runs late (hours, on a busy day) and sometimes drops one outright,
-    # so every Central-time slot gets a wide firing window covering both DST offsets plus the
-    # lateness budget below. slot_gate.sh picks the slot that is actually due; the cache lock keeps
-    # the extra firings from sending twice. The last hour of each window is what catches a slot that
-    # never went out at all and warns about it.
-    - cron: "0 13-18 * * 3"     # Wed 8:00 AM Central (after waivers)
-    - cron: "0 21-23 * * 4"     # Thu 4:00 PM Central (before TNF)
-    - cron: "0 0-2 * * 5"       #   ... the CST tail of the Thursday window
-    - cron: "0,30 15-23 * * 0"  # Sun 10:00 AM, 11:30 AM, 6:30 PM Central
-    - cron: "0,30 0-5 * * 1"    #   ... the CST tail of the Sunday window
+    # so rather than aiming a narrow window at each slot, fire every hour and let slot_gate.sh decide
+    # which Central-time slot the run is standing in for. The cache lock keeps the extra firings from
+    # sending twice, and a firing that arrives past a slot's budget warns instead of staying silent.
+    # Hourly also means no separate CDT/CST windows to keep in sync.
+    - cron: "0 * * * *"
+    # The half-hour slots (Sun 11:30 AM and 6:30 PM Central) need a firing on the half hour too.
+    - cron: "30 16-23 * * 0"
+    - cron: "30 0-2 * * 1"
 
 permissions:
   contents: read
@@ -34,10 +33,14 @@ jobs:
 
       - id: gate
         name: Is a Central-time slot due?
-        # Four hours: past that a lineup check is advising on a lineup that has already locked.
-        env:
-          MAX_LATE_MIN: 240
-        run: bash tools/slot_gate.sh 3-0800 4-1600 0-1000 0-1130 0-1830
+        # One morning report a day at 8:00 Central, plus the slots that sit just before a kickoff.
+        # Budgets are per slot: a morning with no games is still worth reading at lunch (600 min),
+        # Sunday morning has to beat the noon kickoffs (180), and the pre-kickoff slots are only
+        # worth sending while the lineup can still change (60-180). Past its budget a slot warns.
+        run: >-
+          bash tools/slot_gate.sh
+          1-0800:600 2-0800:600 3-0800:600 4-0800:600 5-0800:600 6-0800:600
+          0-0800:180 4-1600:180 0-1130:60 0-1830:60
 
       - if: steps.gate.outputs.slot != ''
         id: lock

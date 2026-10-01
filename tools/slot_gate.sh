@@ -7,7 +7,11 @@
 # slot that is already due rather than demanding an exact match, and the caller's cache lock keeps
 # the extra firings from sending the same report twice.
 #
-# Usage: slot_gate.sh <dow>-<HHMM> [...]     dow is Central-time 0=Sun .. 6=Sat
+# Usage: slot_gate.sh <dow>-<HHMM>[:<budget>] [...]   dow is Central-time 0=Sun .. 6=Sat
+#
+# A slot may carry its own lateness budget in minutes. A morning digest on a day with no games is
+# still worth reading in the afternoon; a pre-kickoff check is not. Slots without one use
+# MAX_LATE_MIN.
 #
 # Outputs to $GITHUB_OUTPUT:
 #   slot=<slot date>-<dow>-<HHMM>  the slot this run is about (empty when nothing is due)
@@ -16,7 +20,7 @@
 #                                  the caller warns once instead of staying silent
 set -euo pipefail
 
-# How late a report may be and still be worth sending. Kickoff-sensitive jobs pass a tight budget;
+# Default budget for slots that do not name their own. Kickoff-sensitive jobs pass a tight one;
 # a recap is happy to arrive in the afternoon. Delays of five hours have been observed.
 MAX_LATE_MIN=${MAX_LATE_MIN:-240}
 
@@ -40,8 +44,11 @@ now=$(( 10#${hhmm:0:2} * 60 + 10#${hhmm:2:2} ))
 clock="$today ${hhmm:0:2}:${hhmm:2:2} Central"
 
 # The slot that came due most recently, looking back through yesterday.
-best="" best_date="" best_late=-1
-for slot in "$@"; do
+best="" best_date="" best_late=-1 best_budget=$MAX_LATE_MIN
+for spec in "$@"; do
+  slot=${spec%%:*}
+  budget=${spec#"$slot"} budget=${budget#:}
+  budget=${budget:-$MAX_LATE_MIN}
   d=${slot%%-*} t=${slot##*-}
   at=$(( 10#${t:0:2} * 60 + 10#${t:2:2} ))
   for back in 0 1; do
@@ -49,7 +56,7 @@ for slot in "$@"; do
     late=$(( now + back * 1440 - at ))
     [ "$late" -ge 0 ] || continue                                   # not due yet
     [ "$best_late" -lt 0 ] || [ "$late" -lt "$best_late" ] || continue  # an even fresher slot won
-    best=$slot best_late=$late
+    best=$slot best_late=$late best_budget=$budget
     [ "$back" = 0 ] && best_date=$today || best_date=$yday
   done
 done
@@ -61,10 +68,10 @@ if [ -z "$best" ]; then
 fi
 
 emit "slot=$best_date-$best"
-if [ "$best_late" -le "$MAX_LATE_MIN" ]; then
-  echo "slot $best is due at $clock, $best_late min late (budget $MAX_LATE_MIN)"
+if [ "$best_late" -le "$best_budget" ]; then
+  echo "slot $best is due at $clock, $best_late min late (budget $best_budget)"
   emit "run=true" "stale=false"
 else
-  echo "slot $best is $best_late min late at $clock, past its $MAX_LATE_MIN min budget: warn instead of sending"
+  echo "slot $best is $best_late min late at $clock, past its $best_budget min budget: warn instead of sending"
   emit "run=false" "stale=true"
 fi
