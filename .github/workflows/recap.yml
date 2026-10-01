@@ -3,11 +3,11 @@ name: recap
 on:
   workflow_dispatch:
   schedule:
-    # Tue 9:00 AM Central. Fires hourly across both DST offsets and the lateness budget below, so a
-    # delayed or dropped firing still lands; slot_gate.sh picks the due slot and the cache lock stops
-    # a second firing from re-sending.
-    - cron: "0 14-23 * * 2"
-    - cron: "0 0-3 * * 3"
+    # Tue 8:00 AM Central, so Tuesday's morning ping is the recap instead of a lineup check (the
+    # check job skips Tuesday for that reason). Fires hourly across both DST offsets and the budget
+    # below, at :17 rather than :00 because the top of the hour is GitHub's busiest dispatch minute.
+    - cron: "17 13-23 * * 2"
+    - cron: "17 0-2 * * 3"
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ jobs:
         # Twelve hours: last week's recap reads the same whenever it lands on Tuesday.
         env:
           MAX_LATE_MIN: 720
-        run: bash tools/slot_gate.sh 2-0900
+        run: bash tools/slot_gate.sh 2-0800
 
       - if: steps.gate.outputs.slot != ''
         id: lock

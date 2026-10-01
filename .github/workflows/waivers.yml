@@ -6,7 +6,7 @@ on:
     # Tue 8:00 PM Central. Fires hourly across both DST offsets and the lateness budget below, so a
     # delayed or dropped firing still lands; slot_gate.sh picks the due slot and the cache lock stops
     # a second firing from re-sending.
-    - cron: "0 1-12 * * 3"
+    - cron: "17 1-12 * * 3"
 
 permissions:
   contents: read

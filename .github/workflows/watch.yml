@@ -5,7 +5,7 @@ on:
   schedule:
     # Every 2 hours from Thursday through Monday morning (UTC days 4,5,6,0,1). Injury-status changes and
     # projection drops for your roster and the opponent's starters. Silent when nothing changed.
-    - cron: "0 */2 * * 4,5,6,0,1"
+    - cron: "17 */2 * * 4,5,6,0,1"
 
 permissions:
   contents: read

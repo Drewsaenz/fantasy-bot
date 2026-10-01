@@ -12,9 +12,8 @@ on:
     # Minute 17, not 0: GitHub queues every repo's scheduled runs together, and the top of the hour
     # is when the whole platform's crons pile up, so :00 is the slowest minute to be delivered.
     - cron: "17 * * * *"
-    # The half-hour slots (Sun 11:30 AM and 6:30 PM Central) need a second firing past the half hour.
+    # The Sun 11:30 AM Central slot needs a second firing past the half hour.
     - cron: "47 16-23 * * 0"
-    - cron: "47 0-2 * * 1"
 
 permissions:
   contents: read
@@ -37,13 +36,14 @@ jobs:
       - id: gate
         name: Is a Central-time slot due?
         # One morning report a day at 8:00 Central, plus the slots that sit just before a kickoff.
+        # Tuesday is absent on purpose: the recap job owns that morning.
         # Budgets are per slot: a morning with no games is still worth reading at lunch (600 min),
         # Sunday morning has to beat the noon kickoffs (180), and the pre-kickoff slots are only
         # worth sending while the lineup can still change (60-180). Past its budget a slot warns.
         run: >-
           bash tools/slot_gate.sh
-          1-0800:600 2-0800:600 3-0800:600 4-0800:600 5-0800:600 6-0800:600
-          0-0800:180 4-1600:180 0-1130:60 0-1830:60
+          1-0800:600 3-0800:600 4-0800:600 5-0800:600 6-0800:600
+          0-0800:180 4-1600:180 0-1130:60
 
       - if: steps.gate.outputs.slot != ''
         id: lock
