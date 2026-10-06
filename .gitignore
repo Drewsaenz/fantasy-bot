@@ -5,3 +5,6 @@ __pycache__/
 live_state.json
 watch_state.json
 dashboard.html
+trigger/node_modules/
+trigger/.wrangler/
+trigger/.dev.vars

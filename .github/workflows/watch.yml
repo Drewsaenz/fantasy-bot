@@ -1,11 +1,10 @@
 name: watch
 
+# Every 2 hours (odd hours Central) from Thursday through Monday: injury-status changes and projection
+# drops for your roster and the opponent's starters. Silent when nothing changed. No schedule here:
+# the Cloudflare Worker under trigger/ dispatches it (GitHub's cron dropped most firings, Oct 2026).
 on:
   workflow_dispatch:
-  schedule:
-    # Every 2 hours from Thursday through Monday morning (UTC days 4,5,6,0,1). Injury-status changes and
-    # projection drops for your roster and the opponent's starters. Silent when nothing changed.
-    - cron: "17 */2 * * 4,5,6,0,1"
 
 permissions:
   contents: read
@@ -51,3 +50,10 @@ jobs:
         with:
           path: watch_state.json
           key: watch-state-${{ github.run_id }}
+
+      - if: failure()
+        name: Say so in Telegram
+        run: bash tools/telegram_fail.sh "status watch"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

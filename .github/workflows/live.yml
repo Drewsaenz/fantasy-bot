@@ -1,14 +1,11 @@
 name: live
 
+# Every 10 minutes inside NFL game windows (Central): Thu and Mon from 7 PM, Sunday from noon, each
+# running an hour past midnight. The script exits quietly when no game is in progress. No schedule
+# here: the Cloudflare Worker under trigger/ dispatches it (GitHub's cron dropped most firings, Oct
+# 2026). Saturday and holiday games are not in the windows; send /live to the bot for those.
 on:
   workflow_dispatch:
-  schedule:
-    # Every 10 minutes inside NFL game windows (Central), padded for both DST offsets.
-    # The script exits quietly when no game is in progress, so off-window runs are cheap.
-    - cron: "*/10 0-5 * * 5"    # Thu night (Fri 00:00-05:59 UTC)
-    - cron: "*/10 17-23 * * 0"  # Sunday afternoon
-    - cron: "*/10 0-5 * * 1"    # Sunday night (Mon 00:00-05:59 UTC)
-    - cron: "*/10 0-5 * * 2"    # Mon night (Tue 00:00-05:59 UTC)
 
 permissions:
   contents: read

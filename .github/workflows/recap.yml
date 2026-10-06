@@ -1,13 +1,10 @@
 name: recap
 
+# Tuesday 8:00 AM Central: the week's recap is Tuesday's morning ping (check skips Tuesday).
+# No schedule here on purpose: GitHub's cron queue dropped most firings (Oct 2026), so the Cloudflare
+# Worker under trigger/ starts this workflow through the workflow_dispatch API, on time and on /recap.
 on:
   workflow_dispatch:
-  schedule:
-    # Tue 8:00 AM Central, so Tuesday's morning ping is the recap instead of a lineup check (the
-    # check job skips Tuesday for that reason). Fires hourly across both DST offsets and the budget
-    # below, at :17 rather than :00 because the top of the hour is GitHub's busiest dispatch minute.
-    - cron: "17 13-23 * * 2"
-    - cron: "17 0-2 * * 3"
 
 permissions:
   contents: read
@@ -21,45 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - id: gate
-        name: Is a Central-time slot due?
-        # Twelve hours: last week's recap reads the same whenever it lands on Tuesday.
-        env:
-          MAX_LATE_MIN: 720
-        run: bash tools/slot_gate.sh 2-0800
-
-      - if: steps.gate.outputs.slot != ''
-        id: lock
-        name: Has this slot already been handled?
-        uses: actions/cache/restore@v4
-        with:
-          path: .slot
-          key: sent-recap-${{ steps.gate.outputs.slot }}
-
-      - id: go
-        if: steps.gate.outputs.run == 'true' && steps.lock.outputs.cache-hit != 'true'
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
-
-      - if: steps.go.outputs.ok == 'true'
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - if: steps.go.outputs.ok == 'true'
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - if: steps.go.outputs.ok == 'true'
-        id: date
+      - id: date
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-      - if: steps.go.outputs.ok == 'true'
+      - name: Sleeper player list (5 MB, fetched at most once a day)
         uses: actions/cache@v4
         with:
           path: .cache
           key: players-${{ steps.date.outputs.today }}
 
-      - if: steps.go.outputs.ok == 'true'
-        name: Weekly recap to Telegram
+      - name: Weekly recap to Telegram
         run: python fantasy_check.py --mode recap --telegram
         env:
           SLEEPER_CACHE_DIR: .cache
@@ -68,26 +41,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - if: steps.gate.outputs.stale == 'true' && steps.lock.outputs.cache-hit != 'true'
-        id: warn
-        name: Warn that this slot never went out
+      - if: failure()
+        name: Say so in Telegram
+        run: bash tools/telegram_fail.sh "weekly recap"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SLOT: ${{ steps.gate.outputs.slot }}
-          RUNS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/recap.yml
-        run: |
-          curl -sS --fail-with-body -X POST \
-            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-            --data-urlencode "disable_web_page_preview=true" \
-            --data-urlencode "text=⚠️ No weekly recap went out for $SLOT. GitHub ran the job too late for it to be worth sending. Run it by hand: $RUNS_URL"
-
-      - if: steps.go.outputs.ok == 'true' || steps.warn.outcome == 'success'
-        name: Mark this slot handled
-        run: mkdir -p .slot && date -u +%FT%TZ > .slot/sent
-      - if: steps.go.outputs.ok == 'true' || steps.warn.outcome == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: .slot
-          key: sent-recap-${{ steps.gate.outputs.slot }}

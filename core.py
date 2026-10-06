@@ -22,6 +22,7 @@ SWAP_MIN_GAIN = 0.5    # ignore lineup swaps worth less than this (projection no
 WAIVER_MIN_GAIN = 1.5  # waiver target must beat your drop candidate's season average by this much
 PROJ_DISAGREE = 3.0    # flag Sleeper vs ESPN projection gaps of this size
 PROJ_DROP = 0.30       # watch mode: projection fell by this fraction since the last poll
+PREGAME_WINDOW = (60, 120)  # watch mode: minutes before kickoff to nudge about a starter; inactives post at T-90
 MOVES_HOURS = 24       # check mode: league transactions this recent
 BYE_LOOKAHEAD = 2      # weeks
 
@@ -385,6 +386,51 @@ def section_watch(snap: Snapshot, state: dict):
             events.append(f"  📉 {snap.label(pid)} ({role}): projection {old['pts']:.1f} → {p.pts:.1f}")
     lines = [f"*{snap.name}*"] + events if events else []
     return lines, len(events), {"players": new}
+
+
+def section_pregame(snap: Snapshot, state: dict, now=None):
+    """Your starters whose game kicks off inside PREGAME_WINDOW and who still need a decision: a bad status,
+    Questionable, bye, no game, or a healthier bench player projecting higher. One nudge per player per week
+    (state["pregame"] remembers who has been named). Returns (lines, count, pregame_list)."""
+    done = set(state.get("pregame", []))
+    lo, hi = PREGAME_WINDOW
+    starters = snap.me.starters
+    fixed = {i: pid for i, pid in enumerate(starters) if pid and snap.locked(pid, now)}
+    locked_bench = {p for p in snap.me.players if p not in starters and snap.locked(p, now)}
+    best = optimize(snap, snap.me.players, snap.slots, fixed=fixed, exclude=locked_bench)
+    to_sit = {p for p in starters if p and p not in best}
+    bench = [p for p in snap.me.players if p not in starters and p not in locked_bench and startable(snap, p)]
+    lines, fired = [], []
+    for slot, pid in zip(snap.slots, starters):
+        if not pid or pid in done:
+            continue
+        p = snap.p(pid)
+        ko = snap.kickoffs.get(p.team)
+        if not ko:
+            continue
+        mins = (ko - (now or _now(ko))).total_seconds() / 60
+        if not lo <= mins <= hi:
+            continue
+        alts = sorted((b for b in bench if snap.p(b).positions() & slot_eligible(slot)), key=snap.pts, reverse=True)
+        if p.status in BAD_STATUSES:
+            why = f"is {p.status}"
+        elif p.bye:
+            why = "is on BYE"
+        elif p.pts == 0:
+            why = "projects 0 (no game?)"
+        elif p.status == "Questionable":
+            why = "is Questionable"
+        elif pid in to_sit and alts and snap.pts(alts[0]) - p.pts >= SWAP_MIN_GAIN:
+            why = f"projects only {p.pts:.1f}"
+        else:
+            continue
+        if p.note and p.status:
+            why += f" ({p.note})"
+        icon = "🚨" if p.status in BAD_STATUSES or p.bye or p.pts == 0 else "⏰"
+        swap = f"Swap option: {snap.fmt(alts[0])}" if alts else f"No bench option for {slot}"
+        lines.append(f"  {icon} {mins:.0f} min to kickoff: {snap.label(pid)} ({slot}) {why}. {swap}")
+        fired.append(pid)
+    return lines, len(fired), sorted(done | set(fired))
 
 
 # ---------- waivers mode ----------

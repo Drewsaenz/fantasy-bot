@@ -1,0 +1,16 @@
+name = "fantasy-trigger"
+main = "src/worker.js"
+compatibility_date = "2026-06-01"
+workers_dev = true
+
+[triggers]
+# One tick every 10 minutes; src/worker.js decides which Central-time slot, if any, it stands for.
+crons = ["*/10 * * * *"]
+
+[vars]
+GITHUB_REPO = "Drewsaenz/fantasy-bot"
+GITHUB_REF = "main"
+DASHBOARD_URL = "https://drewsaenz.github.io/fantasy-bot/"
+
+[observability]
+enabled = true

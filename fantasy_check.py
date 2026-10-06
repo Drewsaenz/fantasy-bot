@@ -12,7 +12,8 @@ Modes:
             your starters' finals vs projection, and the result once your week is done. Silent otherwise.
   dashboard writes a self-contained HTML page (both leagues: lineups with live points, opponent, results,
             standings, full check report) to --out
-  watch     injury-status changes and projection drops of 30%+ for your roster and the opponent's starters
+  watch     injury-status changes and projection drops of 30%+ for your roster and the opponent's starters,
+            plus a nudge 60-120 min before kickoff for any starter who still needs a decision
             since the last poll. Silent otherwise. Meant to run every couple of hours Thu-Sun.
 
 Usage:
@@ -211,8 +212,13 @@ def main():
             l, n, state[snap.key] = core.section_live(snap, state.get(snap.key, {}))
             i = [f"{n} updates"] if n else []
         elif args.mode == "watch":
-            l, n, state[snap.key] = core.section_watch(snap, state.get(snap.key, {}))
-            i = [plural(n, "status change")] if n else []
+            sub = state.get(snap.key, {})
+            l, n, new_sub = core.section_watch(snap, sub)
+            pl, pn, new_sub["pregame"] = core.section_pregame(snap, sub)
+            state[snap.key] = new_sub
+            if pl:
+                l = (l or [f"*{snap.name}*"]) + pl
+            i = ([plural(n, "status change")] if n else []) + ([plural(pn, "kickoff nudge")] if pn else [])
         elif args.mode == "check":
             l, i = core.report_check(snap)
         elif args.mode == "waivers":

@@ -10,7 +10,9 @@ Read-only checker for two leagues, reported in this order: The Austin Powers Pre
 | `core.py` | shared model, lineup optimizer, report sections |
 | `sleeper_league.py`, `espn_league.py` | one adapter per platform |
 | `nfl.py` | schedule helpers: kickoff times, game status, byes |
-| `com.drew.fantasy.*.plist` | the three launchd jobs (copies live in `~/Library/LaunchAgents/`) |
+| `trigger/` | the Cloudflare Worker that schedules the GitHub workflows and answers Telegram commands |
+| `tools/telegram_fail.sh` | the failure notice the workflows post when a run dies before its report |
+| `com.drew.fantasy.*.plist` | the old launchd jobs, kept as a fallback (not loaded) |
 | `.env` | cookies and webhook, never committed (mode 600) |
 
 ## Modes
@@ -24,9 +26,13 @@ cd ~/Desktop/Home/fantasy-bot
 .venv/bin/python fantasy_check.py --week 4
 ```
 
+**watch** (every 30 min Thu through Mon, silent unless something happened)
+1. Status changes and projection drops of 30%+ since the last look, for your roster and the opponent's starters.
+2. 60 to 120 minutes before a starter's kickoff (inactives post at 90), one nudge if he is Out, Doubtful, Questionable, on bye, projecting 0, or beaten by an unlocked bench player, with the best bench swap for that slot. Once per player per week.
+
 Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 
-**check** (Wed 8 AM, Thu 4 PM, Sun 10 AM, Sun 11:30 AM, Sun 6:30 PM)
+**check** (every morning at 8 except Tuesday, Thu 4 PM, Sun 11:30 AM, Central)
 1. Starters who are Out / IR / Doubtful / suspended, on bye, projected 0, or empty slots. Questionable starters listed to watch.
 2. Optimal lineup vs what is set, if the gain is 0.5 or more. Players whose game has kicked off are locked: locked starters stay, locked bench players are not suggested.
 3. Free agents beating your weakest eligible starter by 1.5 or more.
@@ -56,7 +62,7 @@ The check report also ends with **League moves (last 24h)**: your own adds, drop
 
 `--notify` shows a macOS banner only when there is something to act on: a starter alert, a lineup gain, a pickup, an empty slot, or a waiver claim. Recap always sends a one-line result. Failures send their own banner. Banners come from `osascript`, so they appear under **Script Editor** in System Settings > Notifications. Allow that if nothing shows.
 
-`--telegram` sends the full report to your Telegram DM. It reuses the bot that powers the Claude Code Telegram channel (`TELEGRAM_BOT_TOKEN`, the same token as `~/.claude/channels/telegram/.env`) and your Telegram user id as `TELEGRAM_CHAT_ID`. To use a separate bot instead: create one with @BotFather, send it any message, then read your chat id from `https://api.telegram.org/bot<token>/getUpdates` and put both values in `.env`. The scheduled jobs use this flag.
+`--telegram` sends the full report to your Telegram DM from the fantasy bot (`TELEGRAM_BOT_TOKEN`) to your user id (`TELEGRAM_CHAT_ID`). The bot is its own BotFather bot, separate from the one the Claude Code Telegram channel uses, because Telegram lets a bot be read either by long polling (what the Claude Code channel does) or by a webhook (what `trigger/` does), never both. The jobs pass this flag. Sending the bot a command runs a job right away: `/check`, `/waivers`, `/recap`, `/live`, `/watch`, plus `/status` for the last run of each job and `/dashboard` for the link.
 
 `--slack` posts to an incoming webhook instead (`SLACK_WEBHOOK_URL` in `.env`). Optional; the jobs do not pass it. To make a webhook: api.slack.com/apps > Create New App > From scratch > Incoming Webhooks > Add New Webhook to Workspace, then pick the channel.
 
@@ -73,23 +79,39 @@ One self-contained page, both leagues: a banner with anything the check found, l
 
 ## GitHub Actions (runs with the Mac off)
 
-The `.github/workflows/` folder mirrors the launchd jobs so nothing depends on this Mac being awake:
+The `.github/workflows/` folder holds one workflow per mode. They have no `schedule:` of their own: GitHub's cron queue is the lowest-priority dispatch on shared capacity and, measured over Sep 27 to Oct 2 2026, it delivered roughly one scheduled run every 2 to 3 hours for the whole repo and dropped the rest without a trace. Runs started through the `workflow_dispatch` API are served immediately, so the timing lives in a Cloudflare Worker (`trigger/`) that calls that API.
 
-| Workflow | Schedule (Central) | Notes |
+| Workflow | When (Central, from `trigger/src/worker.js`) | Notes |
 |---|---|---|
-| `check.yml` | Wed 8 AM, Thu 4 PM, Sun 10 AM, 11:30 AM, 6:30 PM | also rebuilds and deploys the dashboard |
+| `check.yml` | 8 AM every day but Tuesday, Thu 4 PM, Sun 11:30 AM | also rebuilds and deploys the dashboard |
+| `recap.yml` | Tue 8 AM | Tuesday's morning ping |
 | `waivers.yml` | Tue 8 PM | |
-| `recap.yml` | Tue 9 AM | |
-| `live.yml` | every 10 min in game windows (Thu, Sun, Mon nights, Sunday afternoon) | remembers the last poll via the Actions cache; redeploys the dashboard while games are on |
-| `watch.yml` | every 2 hours, Thu through Mon | status and projection changes; last poll via the Actions cache |
+| `watch.yml` | odd hours, Thu through Mon | status and projection changes; last poll via the Actions cache |
+| `live.yml` | every 10 min: Thu and Mon from 7 PM, Sun from noon, each to 1 AM | last poll via the Actions cache; redeploys the dashboard while games are on |
 
-GitHub cron is UTC and ignores daylight saving, so each slot is scheduled at both offsets and a gate step keeps the one that lands at the right Central time. Saturday games in December and holiday games are not in the live windows; run the workflow by hand from the Actions tab if you want live updates for those.
+Every workflow but `live` ends with a `failure()` step that posts a one-line notice to Telegram, so a red run is never silent. Saturday and holiday games are not in the live windows; send `/live` to the bot for those.
 
 Secrets (repo Settings > Secrets and variables > Actions): `ESPN_S2`, `SWID`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Pages: Settings > Pages > Source: GitHub Actions. When the ESPN cookie expires, update the `ESPN_S2` secret, not just `.env`.
 
-Run anything now: Actions tab > pick the workflow > Run workflow, or `gh workflow run check.yml`.
+Run anything now: send the bot `/check` (or `/waivers`, `/recap`, `/live`, `/watch`), or Actions tab > pick the workflow > Run workflow, or `gh workflow run check.yml`.
 
-With Actions live, the launchd jobs are redundant and can be unloaded (below). They are kept in the repo as a fallback.
+### The trigger (`trigger/`)
+
+A Cloudflare Worker on the free plan. Cloudflare's cron ticks it every 10 minutes; `dueJobs()` converts the tick to Central wall-clock time (DST included) and dispatches whichever slots fall inside that tick. Its `/telegram` route is the bot's webhook: messages from your chat id become dispatches, anything else is ignored. If a dispatch fails (expired token, GitHub down) it tells you in Telegram instead of staying quiet.
+
+```sh
+cd trigger
+npm install                       # wrangler, pinned locally
+npm test                          # schedule table against known instants
+npx wrangler login                # once, personal Cloudflare account
+npx wrangler deploy               # prints the Worker URL
+./setup.sh https://fantasy-trigger.<subdomain>.workers.dev   # secrets from .dev.vars, webhook, command menu
+npm run tail                      # live log while testing
+```
+
+`.dev.vars` (never committed) holds `GITHUB_TOKEN` (fine-grained PAT, this repo only, Actions: read and write), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `TELEGRAM_WEBHOOK_SECRET` (any random string; Telegram sends it back as a header and the Worker refuses webhooks without it). When the PAT expires the morning tick posts a "Couldn't start" warning with the HTTP 401; make a new one and rerun `setup.sh`. Change the schedule in `SCHEDULE`, run `npm test`, redeploy.
+
+The launchd plists are kept in the repo as a fallback only; they are not loaded.
 
 ## Sleep and shutdown
 
