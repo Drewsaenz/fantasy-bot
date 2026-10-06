@@ -83,12 +83,38 @@ svg.spark { width:56px; height:18px; display:block; }
 .pos, .neg { font-variant-numeric:tabular-nums; }
 .pos { color:var(--good); } .neg { color:var(--bad); }
 h3 { font-size:11px; color:var(--muted); font-weight:600; margin:18px 0 6px; text-transform:uppercase; letter-spacing:.07em; }
-svg.hist { width:100%; height:auto; display:block; }
 details { margin-top:14px; }
 summary { cursor:pointer; color:var(--muted); font-size:13px; }
 summary:focus-visible { outline:2px solid var(--live); outline-offset:2px; border-radius:4px; }
 pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; background:var(--bg); padding:10px 12px; border-radius:8px; margin:8px 0 0; }
 .wide { grid-column:1 / -1; }
+/* agenda: the week as a list of deadlines, soonest first */
+.agenda td, .agenda th { vertical-align:top; }
+.agenda td.when { white-space:nowrap; font-weight:600; }
+.agenda td.rel { white-space:nowrap; color:var(--muted); font-variant-numeric:tabular-nums; }
+.agenda td.todo { white-space:normal; }
+.agenda tr.past td { color:var(--muted); font-weight:400; }
+.agenda tr.act td.when { color:var(--warn); }
+.agenda .lg { display:inline-block; font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;
+              color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-right:6px; }
+.agenda ul { margin:2px 0 0; padding-left:16px; }
+.agenda li { margin:1px 0; }
+/* head to head: my starter and theirs on one row, slot down the middle */
+.h2h td, .h2h th { white-space:nowrap; }
+.h2h td.p { white-space:normal; }
+.h2h td.r, .h2h th.r { text-align:right; }
+.h2h td.slot, .h2h th.slot { text-align:center; color:var(--muted); font-size:11px; letter-spacing:.04em;
+                             background:var(--bg); width:1%; padding-left:10px; padding-right:10px; }
+.h2h .ko { display:block; color:var(--muted); font-size:11.5px; font-weight:400; }
+.h2h .nm.live { color:var(--live); font-weight:600; }
+.h2h .nm.done { color:var(--muted); }
+/* results: one row per week, bar for the margin */
+.hist td.bar { width:40%; min-width:120px; padding-right:0; }
+.hist .track { display:flex; flex-direction:column; gap:2px; }
+.hist .track i { display:block; height:6px; border-radius:3px; min-width:2px; }
+.hist .track i.me { background:var(--good); }
+.hist .track i.me.l { background:var(--bad); }
+.hist .track i.them { background:var(--line); }
 @media (max-width:480px) { main, header { padding-left:12px; padding-right:12px; } .card { padding:14px; } .score .big { font-size:24px; } }
 """
 
@@ -172,40 +198,88 @@ def player_row(snap, slot, pid, bench=False):
             f'<td class="num">{p.pts:.1f}</td><td class="num pts">{act_html}</td><td class="num">{diff_html}</td></tr>')
 
 
-def lineup_table(snap, team, bench=True):
-    rows = [player_row(snap, s, pid) for s, pid in zip(snap.slots, team.starters)]
+def _h2h_name(snap, pid):
+    """Name, tags and kickoff for one side of the matchup row."""
+    if not pid:
+        return '<span class="nm neg">EMPTY</span>'
+    p = snap.p(pid)
+    gs = core.game_state(snap, pid)
+    tags = ""
+    title = f' title="{esc(p.note)}"' if p.note else ""
+    if p.status in core.BAD_STATUSES:
+        tags += f'<span class="tag bad"{title}>{esc(p.status)}</span>'
+    elif p.status:
+        tags += f'<span class="tag warn"{title}>{esc(p.status)}</span>'
+    if p.bye:
+        tags += '<span class="tag bad">BYE</span>'
+    nm = f"{p.team} D/ST" if p.pos == "DEF" else f"{p.name} <span style='color:var(--muted)'>{p.pos}-{p.team}</span>"
+    cls = " live" if gs == "live" else " done" if gs == "final" else ""
+    return f'<span class="nm{cls}">{nm}</span>{tags}{game_cell(snap, pid)}'
+
+
+def _h2h_pts(snap, pid):
+    if not pid:
+        return '<span style="color:var(--muted)">–</span>'
+    p = snap.p(pid)
+    gs = core.game_state(snap, pid)
+    if p.actual is None or gs == "pre":
+        return '<span style="color:var(--muted)">–</span>'
+    return f"{p.actual:.1f}"
+
+
+def h2h_table(snap, opp):
+    """My starters and the opponent's on the same row, slot down the middle, so the matchup reads across."""
+    rows = []
+    for slot, mine, theirs in zip(snap.slots, snap.me.starters, opp.starters):
+        rows.append(
+            "<tr>"
+            f'<td class="p">{_h2h_name(snap, mine)}</td>'
+            f'<td class="num">{snap.pts(mine):.1f}</td><td class="num pts">{_h2h_pts(snap, mine)}</td>'
+            f'<td class="slot">{esc(slot)}</td>'
+            f'<td class="num pts">{_h2h_pts(snap, theirs)}</td><td class="num">{snap.pts(theirs):.1f}</td>'
+            f'<td class="p r">{_h2h_name(snap, theirs)}</td>'
+            "</tr>")
+    head = (f'<thead><tr><th>{esc(snap.me.name)}</th><th class="num">Proj</th><th class="num">Pts</th>'
+            f'<th class="slot">Slot</th><th class="num">Pts</th><th class="num">Proj</th>'
+            f'<th class="r">{esc(opp.name)}</th></tr></thead>')
+    return f'<div class="scroll"><table class="h2h">{head}<tbody>{"".join(rows)}</tbody></table></div>'
+
+
+def lineup_table(snap, team, bench=True, starters=True):
+    rows = [player_row(snap, s, pid) for s, pid in zip(snap.slots, team.starters)] if starters else []
     if bench:
-        starters = set(p for p in team.starters if p)
-        for pid in sorted((p for p in team.players if p not in starters), key=snap.pts, reverse=True):
+        on = set(p for p in team.starters if p)
+        for pid in sorted((p for p in team.players if p not in on), key=snap.pts, reverse=True):
             rows.append(player_row(snap, "BN", pid, bench=True))
+    if not rows:
+        return ""
     return ('<div class="scroll"><table><thead><tr><th>Slot</th><th>Player</th><th>Trend</th><th>Game</th><th class="num">Proj</th><th class="num">Pts</th><th class="num">+/-</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
-def history_svg(hist):
+def history_table(hist):
+    """One row per week. The two bars share a scale across the season, so a blowout looks like one."""
     if not hist:
         return '<div class="sub">No completed weeks yet.</div>'
-    n = len(hist)
-    slot, H, base = 110, 124, 94  # fixed per-week width, so two played weeks don't stretch across the card
-    W = n * slot
-    bar = min(28, slot * 0.35)
-    top = max([x["mine"] for x in hist] + [x["theirs"] or 0 for x in hist] + [1]) * 1.15
-    parts = []
-    for i, x in enumerate(hist):
-        cx = i * slot + slot / 2
-        mh = x["mine"] / top * (base - 16)
-        th = (x["theirs"] or 0) / top * (base - 16)
-        win = x["theirs"] is not None and x["mine"] > x["theirs"]
-        color = "var(--good)" if win else "var(--bad)" if x["theirs"] is not None else "var(--muted)"
-        parts.append(f'<rect x="{cx - bar - 2:.1f}" y="{base - mh:.1f}" width="{bar:.1f}" height="{mh:.1f}" fill="{color}" rx="3"/>')
-        parts.append(f'<rect x="{cx + 2:.1f}" y="{base - th:.1f}" width="{bar:.1f}" height="{th:.1f}" fill="var(--line)" rx="3"/>')
-        parts.append(f'<text x="{cx - bar / 2 - 2:.1f}" y="{base - mh - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--ink)">{x["mine"]:.0f}</text>')
-        if x["theirs"] is not None:
-            parts.append(f'<text x="{cx + bar / 2 + 2:.1f}" y="{base - th - 4:.1f}" font-size="11" text-anchor="middle" fill="var(--muted)">{x["theirs"]:.0f}</text>')
-        parts.append(f'<text x="{cx:.1f}" y="{H - 16}" font-size="11" text-anchor="middle" fill="var(--ink)">Wk {x["week"]}</text>')
-        parts.append(f'<text x="{cx:.1f}" y="{H - 4}" font-size="9.5" text-anchor="middle" fill="var(--muted)">{esc(x["opp"])[:14]}</text>')
-    return (f'<svg class="hist" style="max-width:{W}px" viewBox="0 0 {W} {H}" role="img"'
-            f' aria-label="weekly scores, you vs opponent">{"".join(parts)}</svg>')
+    top = max([x["mine"] for x in hist] + [x["theirs"] or 0 for x in hist] + [1])
+    rows = []
+    for x in hist:
+        them = x["theirs"]
+        played = them is not None
+        win = played and x["mine"] > them
+        cls = "pos" if win else "neg" if played else ""
+        bar = (f'<span class="track"><i class="me{"" if win else " l"}" style="width:{x["mine"] / top * 100:.0f}%"></i>'
+               f'<i class="them" style="width:{(them or 0) / top * 100:.0f}%"></i></span>')
+        rows.append(
+            f'<tr><td>Wk {x["week"]}</td><td>{esc(x["opp"])}</td>'
+            f'<td class="num">{x["mine"]:.1f}</td>'
+            f'<td class="num">{f"{them:.1f}" if played else "–"}</td>'
+            f'<td class="num {cls}">{f"{x["mine"] - them:+.1f}" if played else ""}</td>'
+            f'<td class="{cls}">{"W" if win else "L" if played else "–"}</td>'
+            f'<td class="bar">{bar}</td></tr>')
+    return ('<div class="scroll"><table class="hist"><thead><tr><th>Week</th><th>Opponent</th>'
+            '<th class="num">You</th><th class="num">Them</th><th class="num">Margin</th><th>Result</th><th></th>'
+            f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
 
 
 def standings_table(st):
@@ -234,6 +308,85 @@ def waivers_block(snap):
             f'"claim" beats both your drop and your worst at that position.</div>'
             '<div class="scroll"><table><thead><tr><th>Pos</th><th>Player</th><th class="num">Next wk</th><th class="num">Season</th><th class="num">Owned</th></tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table></div>')
+
+
+def _decision(snap, slot, pid):
+    """Why this starter still needs a look before his game locks, or None if he is fine."""
+    p = snap.p(pid)
+    if p.bye:
+        return "on BYE"
+    if p.status in core.BAD_STATUSES:
+        return f"is {p.status}"
+    if p.pts == 0:
+        return "projects 0, check he has a game"
+    if p.status:
+        return f"is {p.status}"
+    on = {x for x in snap.me.starters if x}
+    alts = [b for b in snap.me.players
+            if b not in on and not snap.locked(b) and core.startable(snap, b)
+            and snap.p(b).positions() & core.slot_eligible(slot)]
+    best = max(alts, key=snap.pts, default=None)
+    if best and snap.pts(best) - p.pts >= core.SWAP_MIN_GAIN:
+        return f"projects {p.pts:.1f}; bench has {snap.label(best)} at {snap.pts(best):.1f}"
+    return None
+
+
+def _rel(delta_s):
+    if delta_s < 0:
+        return "locked"
+    m = delta_s / 60
+    if m < 90:
+        return f"{m:.0f} min"
+    h = m / 60
+    return f"{h:.0f} h" if h < 36 else f"{h / 24:.0f} d"
+
+
+def agenda_card(snaps, now):
+    """The week as a list of deadlines: every kickoff that locks part of a lineup, soonest first,
+    with the starters that still need a decision before it."""
+    slates, loose = {}, []
+    for snap in snaps:
+        for slot, pid in zip(snap.slots, snap.me.starters):
+            if not pid:
+                loose.append((snap, slot, None, "empty slot, nobody is in it"))
+                continue
+            ko = snap.kickoffs.get(snap.p(pid).team)
+            why = _decision(snap, slot, pid)
+            if snap.p(pid).bye or not ko:
+                loose.append((snap, slot, pid, why or "no kickoff time"))
+                continue
+            slates.setdefault(ko.astimezone(LOCAL_TZ) if ko.tzinfo else ko, []).append((snap, slot, pid, why))
+    if not slates and not loose:
+        return ""
+    rows = []
+    if loose:
+        items = "".join(f'<li><span class="lg">{esc(sn.key)}</span>{esc(sl)}: '
+                        f'{esc(sn.label(pid) + " " if pid else "")}{esc(w)}</li>' for sn, sl, pid, w in loose)
+        rows.append(f'<tr class="act"><td class="when">Now</td><td class="rel"></td><td class="num"></td>'
+                    f'<td class="todo"><ul>{items}</ul></td></tr>')
+    for ko in sorted(slates):
+        group = slates[ko]
+        past = ko <= now
+        todo = [(sn, sl, pid, w) for sn, sl, pid, w in group if w]
+        leagues = sorted({sn.key for sn, _, _, _ in group})
+        if past:
+            what = "started" if not todo else "too late to change"
+        elif todo:
+            what = "".join(f'<li><span class="lg">{esc(sn.key)}</span>{esc(sn.label(pid))} ({esc(sl)}) {esc(w)}</li>'
+                           for sn, sl, pid, w in todo)
+            what = f"<ul>{what}</ul>"
+        else:
+            what = f'<span style="color:var(--muted)">set, nothing to decide ({", ".join(leagues)})</span>'
+        cls = "past" if past else "act" if todo else ""
+        rows.append(f'<tr class="{cls}"><td class="when">{esc(ko.strftime("%a %-I:%M %p"))}</td>'
+                    f'<td class="rel">{esc(_rel((ko - now).total_seconds()))}</td>'
+                    f'<td class="num">{len(group)}</td><td class="todo">{what}</td></tr>')
+    return ('<section class="card wide agenda"><h2>This week</h2>'
+            '<div class="sub">Central time, soonest first. Each row is a kickoff that locks part of your lineup. '
+            'Decisions are listed against the deadline they have to beat. '
+            'The bot messages you at 8 AM daily and again 60 to 120 minutes before any starter who still needs a call.</div>'
+            '<div class="scroll"><table><thead><tr><th>Kickoff</th><th>In</th><th class="num">Locks</th>'
+            f'<th>To do</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></section>')
 
 
 def league_card(snap, report):
@@ -275,11 +428,15 @@ def league_card(snap, report):
         '<div class="vs">vs</div>'
         f'<div class="side them{them_lead}"><div class="big">{opp_big:.1f}</div><div class="proj">{opp_sub}{playing(opp)}</div></div>'
         '</div>')
-    parts.append(lineup_table(snap, snap.me))
     if opp:
-        parts.append(f"<h3>{esc(opp.name)}</h3>" + lineup_table(snap, opp, bench=False))
+        parts.append(h2h_table(snap, opp))
+        bn = lineup_table(snap, snap.me, bench=True, starters=False)
+        if bn:
+            parts.append("<h3>Your bench</h3>" + bn)
+    else:
+        parts.append(lineup_table(snap, snap.me))
     parts.append(waivers_block(snap))
-    parts.append("<h3>Results</h3>" + history_svg(snap.history))
+    parts.append("<h3>Results</h3>" + history_table(snap.history))
     if snap.standings:
         parts.append("<h3>Standings</h3>" + standings_table(snap.standings))
     if report_text:
@@ -290,7 +447,7 @@ def league_card(snap, report):
 
 def render(snaps, reports, failures=()):
     now = datetime.now(LOCAL_TZ)
-    cards = "".join(league_card(s, reports.get(s.key)) for s in snaps)
+    cards = agenda_card(snaps, now) + "".join(league_card(s, reports.get(s.key)) for s in snaps)
     cross = core.section_exposure(snaps) + core.section_projection_gaps(snaps)
     extra = ""
     if cross:
