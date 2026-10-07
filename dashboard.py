@@ -89,6 +89,7 @@ summary:focus-visible { outline:2px solid var(--live); outline-offset:2px; borde
 pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; background:var(--bg); padding:10px 12px; border-radius:8px; margin:8px 0 0; }
 .wide { grid-column:1 / -1; }
 /* agenda: the week as a list of deadlines, soonest first */
+.agenda h2 { margin-bottom:12px; }
 .agenda td, .agenda th { vertical-align:top; }
 .agenda td.when { white-space:nowrap; font-weight:600; }
 .agenda td.rel { white-space:nowrap; color:var(--muted); font-variant-numeric:tabular-nums; }
@@ -382,9 +383,6 @@ def agenda_card(snaps, now):
                     f'<td class="rel">{esc(_rel((ko - now).total_seconds()))}</td>'
                     f'<td class="num">{len(group)}</td><td class="todo">{what}</td></tr>')
     return ('<section class="card wide agenda"><h2>This week</h2>'
-            '<div class="sub">Central time, soonest first. Each row is a kickoff that locks part of your lineup. '
-            'Decisions are listed against the deadline they have to beat. '
-            'The bot messages you at 8 AM daily and again 60 to 120 minutes before any starter who still needs a call.</div>'
             '<div class="scroll"><table><thead><tr><th>Kickoff</th><th>In</th><th class="num">Locks</th>'
             f'<th>To do</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></section>')
 
