@@ -45,7 +45,7 @@ header { position:sticky; top:0; z-index:5; padding:14px 20px 12px; display:flex
          background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid var(--line); }
 header h1 { margin:0; font-size:17px; font-weight:650; letter-spacing:-.01em; }
 header .muted { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
-main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:16px; padding:16px 20px 40px; }
+main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr)); gap:16px; padding:16px 20px 40px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; min-width:0; box-shadow:var(--shadow); }
 .scroll { overflow-x:auto; }
 .card h2 { margin:0 0 2px; font-size:17px; letter-spacing:-.01em; }
@@ -102,7 +102,11 @@ pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre
 .agenda li { margin:1px 0; }
 /* head to head: my starter and theirs on one row, slot down the middle */
 .h2h td, .h2h th { white-space:nowrap; }
-.h2h td.p { white-space:normal; }
+.h2h td, .h2h th { padding-left:4px; padding-right:4px; }
+.h2h td.p, .h2h th:first-child, .h2h th.r { white-space:normal; }
+.h2h .nm span { white-space:nowrap; }
+.h2h .game { display:block; }
+.h2h .tag { margin-left:0; }
 .h2h td.r, .h2h th.r { text-align:right; }
 .h2h td.slot, .h2h th.slot { text-align:center; color:var(--muted); font-size:11px; letter-spacing:.04em;
                              background:var(--bg); width:1%; padding-left:10px; padding-right:10px; }
@@ -110,7 +114,7 @@ pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre
 .h2h .nm.live { color:var(--live); font-weight:600; }
 .h2h .nm.done { color:var(--muted); }
 /* results: one row per week, bar for the margin */
-.hist td.bar { width:40%; min-width:120px; padding-right:0; }
+.hist td.bar { width:40%; min-width:60px; padding-right:0; }
 .hist .track { display:flex; flex-direction:column; gap:2px; }
 .hist .track i { display:block; height:6px; border-radius:3px; min-width:2px; }
 .hist .track i.me { background:var(--good); }
