@@ -4,7 +4,6 @@ Platform-neutral model and report sections shared by the Sleeper and ESPN adapte
 Slot vocabulary is Sleeper's: QB RB WR TE K DEF FLEX WRRB_FLEX REC_FLEX SUPER_FLEX.
 """
 import re
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
@@ -23,7 +22,6 @@ WAIVER_MIN_GAIN = 1.5  # waiver target must beat your drop candidate's season av
 PROJ_DISAGREE = 3.0    # flag Sleeper vs ESPN projection gaps of this size
 PROJ_DROP = 0.30       # watch mode: projection fell by this fraction since the last poll
 PREGAME_WINDOW = (60, 120)  # watch mode: minutes before kickoff to nudge about a starter; inactives post at T-90
-MOVES_HOURS = 24       # check mode: league transactions this recent
 BYE_LOOKAHEAD = 2      # weeks
 
 # Depth that matters for trade value in a 2RB/2WR/2FLEX format
@@ -176,32 +174,49 @@ def plural(n, word, suffix=""):
 
 
 # ---------- check-mode sections ----------
+# Phone-first: one line per topic, players as "E. Wilson 13.2", details left to the dashboard.
+
+STATUS_ABBR = {"Questionable": "Q", "Doubtful": "D"}
+
+
+def short(snap: Snapshot, pid, pts=True, status=True):
+    """'E. Wilson 13.2', 'CIN D/ST 8.8'. Initial plus surname keeps two Wilsons on one roster apart."""
+    p = snap.p(pid)
+    if p.pos == "DEF":
+        name = f"{p.team} D/ST"
+    else:
+        parts = p.name.split()
+        rest = [w for w in parts[1:] if w.rstrip(".").lower() not in ("jr", "sr", "ii", "iii", "iv", "v")]
+        name = f"{parts[0][0]}. {' '.join(rest)}" if rest else p.name
+    st = STATUS_ABBR.get(p.status, p.status) if status else None
+    return name + (f" ({st})" if st else "") + (f" {snap.pts(pid):.1f}" if pts else "")
+
 
 def section_alerts(snap: Snapshot):
     lines, issues, alerts, watch, locked_bad = [], [], [], [], []
     for slot, pid in zip(snap.slots, snap.me.starters):
         if not pid:
-            alerts.append(f"{slot}: EMPTY slot")
+            alerts.append(f"{slot} empty")
             continue
         p = snap.p(pid)
         problem = None
         if p.status in BAD_STATUSES:
-            problem = f"is {p.status}"
+            problem = ""
         elif p.bye:
-            problem = "is on BYE"
+            problem = " on bye"
         elif p.pts == 0:
-            problem = "projects 0 (no game?)"
-        if problem:
-            (locked_bad if snap.locked(pid) else alerts).append(f"{slot}: {snap.fmt(pid)} {problem}")
+            problem = " projects 0"
+        if problem is not None:
+            (locked_bad if snap.locked(pid) else alerts).append(f"{slot} {short(snap, pid, pts=False)}{problem}")
         elif p.status == "Questionable":
-            watch.append(f"{slot}: {snap.fmt(pid)}")
+            watch.append(short(snap, pid, pts=False, status=False))
     if alerts:
-        lines += ["🚨 Fix these:"] + [f"  - {a}" for a in alerts] + [""]
+        lines.append("🚨 Fix: " + ", ".join(alerts))
         issues.append(plural(len(alerts), "starter alert"))
     if locked_bad:
-        lines += ["🔒 Too late to fix (already kicked off):"] + [f"  - {a}" for a in locked_bad] + [""]
+        lines.append("🔒 Too late: " + ", ".join(locked_bad))
     if watch:
-        lines += ["👀 Questionable, check before kickoff:"] + [f"  - {w}" for w in watch] + [""]
+        lines.append("👀 Questionable: " + ", ".join(watch))
     return lines, issues
 
 
@@ -222,20 +237,18 @@ def section_lineup(snap: Snapshot):
     to_start = [p for p in best if p and p not in starters]
     to_sit = [p for p in starters if p and p not in best]
     if (to_start or to_sit) and gain >= SWAP_MIN_GAIN:
-        lines.append(f"🔁 Lineup changes (+{gain:.1f} proj):")
-        lines += [f"  - START {snap.fmt(p)}" for p in to_start]
-        lines += [f"  - SIT   {snap.fmt(p)}" for p in to_sit]
+        lines.append(f"🔁 +{gain:.1f} ({cur_total:.1f} → {best_total:.1f})")
+        if to_start:
+            lines.append("  start " + ", ".join(short(snap, p) for p in to_start))
+        if to_sit:
+            lines.append("  sit " + ", ".join(short(snap, p) for p in to_sit))
         issues.append(f"lineup +{gain:.1f}")
     else:
-        note = f" (+{gain:.1f} available, below threshold)" if to_start else ""
-        lines.append("✅ Lineup matches projections." + note)
+        lines.append(f"✅ Lineup optimal, {cur_total:.1f} proj")
     holes = [s for s, p in zip(snap.slots, best) if not p]
     if holes:
-        lines.append(f"  ⚠️ No healthy player for {', '.join(holes)}. Pick one up (see free agents).")
+        lines.append(f"⚠️ Nobody healthy for {', '.join(holes)}")
         issues.append(plural(len(holes), "empty slot"))
-    if fixed:
-        lines.append(f"  {plural(len(fixed), 'locked starter')} kept in place.")
-    lines += [f"Projected: {cur_total:.1f} as set, {best_total:.1f} optimal", ""]
     return lines, issues, best
 
 
@@ -253,112 +266,61 @@ def section_free_agents(snap: Snapshot, best):
                      key=snap.pts, reverse=True)[:2]
         for fa in fas:
             if snap.pts(fa) - floor_val >= FA_MIN_GAIN:
-                target = f"your empty {empty[0]}" if empty else f"your {snap.label(floor)} ({floor_val:.1f})"
-                fa_lines.append(f"  - {snap.fmt(fa)} > {target}")
+                target = f"empty {empty[0]}" if empty else short(snap, floor)
+                fa_lines.append(f"{short(snap, fa)} > {target}")
     if fa_lines:
-        lines += ["➕ Free agents worth a look this week:"] + fa_lines
+        lines.append("➕ FA: " + "; ".join(fa_lines))
         bench = [p for p in snap.me.players if p not in best]
         if bench:
             weakest = min(bench, key=lambda p: snap.p(p).season_avg or snap.pts(p))
-            avg = snap.p(weakest).season_avg
-            lines.append(f"  Drop candidate: {snap.fmt(weakest)}" + (f" (season avg {avg:.1f})" if avg else ""))
-        lines.append("")
+            lines.append(f"  drop {short(snap, weakest, pts=False)}")
         issues.append(plural(len(fa_lines), "FA pickup"))
     return lines, issues
 
 
 def section_opponent(snap: Snapshot, best_total):
-    lines = []
     if not snap.opp:
-        return ["🆚 No matchup found this week.", ""]
-    opp_total = total(snap, snap.opp.starters)
-    rec = f" ({snap.opp.record}" + (f", {snap.opp.extra}" if snap.opp.extra else "") + ")" if snap.opp.record else ""
-    lines.append(f"🆚 {snap.opp.name}{rec}: {opp_total:.1f} proj vs your {best_total:.1f} optimal")
-    for slot, pid in zip(snap.slots, snap.opp.starters):
-        if not pid:
-            lines.append(f"  - their {slot} is EMPTY")
-        else:
-            p = snap.p(pid)
-            if p.status in BAD_STATUSES | {"Questionable"} or p.bye:
-                lines.append(f"  - their {slot}: {snap.fmt(pid)}")
-    return lines + [""]
+        return ["🆚 No matchup this week"]
+    notes = [f"{slot} empty" for slot, pid in zip(snap.slots, snap.opp.starters) if not pid]
+    notes += [short(snap, pid, pts=False) for pid in snap.opp.starters
+              if pid and (snap.p(pid).status in BAD_STATUSES | {"Questionable"} or snap.p(pid).bye)]
+    line = f"🆚 {snap.opp.name} {total(snap, snap.opp.starters):.1f} vs your {best_total:.1f}"
+    return [line + (" · " + ", ".join(notes) if notes else "")]
 
 
 def section_byes(snap: Snapshot):
-    """Starters and depth on bye in the next BYE_LOOKAHEAD weeks."""
-    lines = []
+    """My players on bye in the next BYE_LOOKAHEAD weeks, flagging positions left with no one to start."""
     by_week = {}
     for pid in snap.me.players:
         w = snap.byes.get(snap.p(pid).team)
         if w:
             by_week.setdefault(w, []).append(pid)
+    parts = []
     for w in sorted(by_week):
         pids = sorted(by_week[w], key=snap.pts, reverse=True)
         out_pos = {}
         for pid in pids:
             out_pos[snap.p(pid).pos] = out_pos.get(snap.p(pid).pos, 0) + 1
-        left = []
+        short_pos = []
         for pos, n in out_pos.items():
             have = sum(1 for p in snap.me.players if snap.p(p).pos == pos and startable(snap, p)) - n
-            need = sum(1 for s in snap.slots if s == pos)
-            if have < need:
-                left.append(f"only {have} {pos} left for {need} slots")
-        names = ", ".join(snap.label(p) for p in pids)
-        lines.append(f"  - Week {w}: {names}" + (f"  ⚠️ {'; '.join(left)}" if left else ""))
-    if lines:
-        lines = ["📅 Byes coming up:"] + lines + [""]
-    return lines
+            if have < sum(1 for s in snap.slots if s == pos):
+                short_pos.append(pos)
+        names = ", ".join(short(snap, p, pts=False, status=False) for p in pids)
+        parts.append(f"wk {w} {names}" + (f" (⚠️ need a {'/'.join(short_pos)})" if short_pos else ""))
+    return ["📅 Byes: " + " · ".join(parts)] if parts else []
 
 
 def report_check(snap: Snapshot):
-    lines = [f"*{snap.name} - Week {snap.week} check*", ""]
+    lines = [f"*{snap.name} · wk {snap.week}*"]
     issues = []
     a, i = section_alerts(snap)
-    lines += a
-    issues += i
-    l, i, best = section_lineup(snap)
-    lines += l
-    issues += i
-    f, i = section_free_agents(snap, best)
-    lines += f
-    issues += i
+    l, i2, best = section_lineup(snap)
+    f, i3 = section_free_agents(snap, best)
+    lines += a + l + f
+    issues += i + i2 + i3
     lines += section_opponent(snap, total(snap, best))
     lines += section_byes(snap)
-    m, i = section_moves(snap)
-    lines += m
-    issues += i
-    return lines, issues
-
-
-def section_moves(snap: Snapshot, hours=MOVES_HOURS):
-    """Your own transactions and other teams' drops that beat your bench, from the last `hours`."""
-    since = time.time() - hours * 3600
-    recent = sorted((m for m in snap.moves if m.get("ts", 0) >= since), key=lambda m: m["ts"])
-    if not recent:
-        return [], []
-    lines, issues = [f"🔄 League moves (last {hours}h):"], []
-    starters = {p for p in snap.me.starters if p}
-    bench = [p for p in snap.me.players if p not in starters and snap.p(p).pos not in ("K", "DEF")]
-    floor = min(bench, key=snap.pts) if bench else None
-    mine = [m for m in recent if m["mine"]]
-    for m in mine:
-        verb = {"add": "added", "drop": "dropped", "waiver add": "claimed", "trade": "traded"}.get(m["action"], m["action"])
-        st = f" ({m['status']})" if m.get("status") and m["status"] != "complete" else ""
-        bid = f" for ${m['bid']}" if m.get("bid") else ""
-        lines.append(f"  - you {verb} {snap.fmt(m['pid'])}{bid}{st}")
-    notable, other = [], 0
-    for m in recent:
-        if m["mine"]:
-            continue
-        if m["action"] == "drop" and floor and startable(snap, m["pid"]) and snap.pts(m["pid"]) >= snap.pts(floor) + 1.0:
-            notable.append(f"  💡 {m['team']} dropped {snap.fmt(m['pid'])}, beats your {snap.label(floor)} ({snap.pts(floor):.1f})")
-        else:
-            other += 1
-    lines += notable
-    if other:
-        lines.append(f"  {other} other move{'s' if other != 1 else ''} around the league")
-    if notable:
-        issues.append(plural(len(notable), "dropped player", " worth a look"))
     return lines + [""], issues
 
 
@@ -605,14 +567,11 @@ def section_exposure(snaps):
     shared = [(k, v) for k, v in seen.items() if len(v) >= 2]
     if not shared:
         return lines
-    lines.append("🔗 On both of your rosters:")
+    names = []
     for _, v in sorted(shared, key=lambda kv: -max(s.pts(pid) for s, pid in kv[1])):
         s, pid = v[0]
-        p = s.p(pid)
-        tag = f" [{p.status}]" if p.status else ""
-        risk = "  ⚠️ one injury hits both teams" if p.status else ""
-        lines.append(f"  - {s.label(pid)}{tag}: " + ", ".join(f"{ss.key} {ss.pts(pp):.1f}" for ss, pp in v) + risk)
-    return lines + [""]
+        names.append(short(s, pid, pts=False) + (" ⚠️" if s.p(pid).status else ""))
+    return ["🔗 On both rosters: " + ", ".join(names), ""]
 
 
 def section_projection_gaps(snaps):
@@ -637,11 +596,9 @@ def section_projection_gaps(snaps):
         gap = vals[hi] - vals[lo]
         if gap >= PROJ_DISAGREE:
             label = key.split("|")[0].title() if not key.endswith("DEF") else key.replace(" DEF", " D/ST")
-            rows.append((gap, f"  - {label}: {hi} {vals[hi]:.1f} vs {lo} {vals[lo]:.1f} (gap {gap:.1f})"))
+            rows.append((gap, f"{label} {hi} {vals[hi]:.1f} / {lo} {vals[lo]:.1f}"))
     if rows:
-        lines += ["⚖️ Projections disagree on your players (worth a second look before trusting either):"]
-        lines += [r for _, r in sorted(rows, reverse=True)[:8]]
-        lines.append("")
+        lines += ["⚖️ Projections disagree: " + "; ".join(r for _, r in sorted(rows, reverse=True)[:5]), ""]
     return lines
 
 

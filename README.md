@@ -48,7 +48,6 @@ Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 **recap** (Tue 9 AM)
 - Last week's result, starters projected vs scored, points left on the bench with who should have started, biggest boom and bust, any zeros.
 
-The check report also ends with **League moves (last 24h)**: your own adds, drops, and waiver results, plus any player another team dropped who projects at least a point better than your weakest skill-position bench player.
 
 **watch** (every 2 hours, Thursday through Monday morning)
 - Injury-status changes for your whole roster and the opponent's starters (Healthy → Questionable → Out and back), with Sleeper's injury note when there is one, and projection drops of 30% or more since the last poll, which usually means news broke. Locked players are skipped. Silent when nothing changed. State in `watch_state.json`.
