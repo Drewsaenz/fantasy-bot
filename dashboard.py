@@ -99,6 +99,14 @@ pre { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre
 .agenda .lg { display:inline-block; font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;
               color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-right:6px; }
 .agenda ul { margin:2px 0 0; padding-left:16px; }
+/* do now: the check report's fixes as numbered steps, top of the page */
+.donow { border-color:var(--warn); }
+.donow h2 { margin-bottom:10px; }
+.donow .lgname { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin:12px 0 4px; }
+.donow .lgname:first-of-type { margin-top:0; }
+.donow ol { margin:0; padding-left:22px; font-size:16px; line-height:1.5; }
+.donow li { margin:3px 0; }
+.donow b { font-weight:650; }
 .agenda li { margin:1px 0; }
 /* head to head: my starter and theirs on one row, slot down the middle */
 .h2h td, .h2h th { white-space:nowrap; }
@@ -346,19 +354,35 @@ def _rel(delta_s):
     return f"{h:.0f} h" if h < 36 else f"{h / 24:.0f} d"
 
 
+def donow_card(snaps):
+    """Every lineup fix and pickup from the check report, as steps in the order to make them."""
+    blocks = []
+    for snap in snaps:
+        steps = core.todo_moves(snap)
+        if steps:
+            items = "".join(f"<li><b>{esc(verb)}</b> {esc(text)}</li>" for verb, text in steps)
+            blocks.append(f'<div class="lgname">{esc(snap.name)}</div><ol>{items}</ol>')
+    if not blocks:
+        return ""
+    return f'<section class="card wide donow"><h2>Do now</h2>{"".join(blocks)}</section>'
+
+
 def agenda_card(snaps, now):
     """The week as a list of deadlines: every kickoff that locks part of a lineup, soonest first,
     with the starters that still need a decision before it."""
     slates, loose = {}, []
+    covered = {snap.key for snap in snaps if core.todo_moves(snap)}
     for snap in snaps:
         for slot, pid in zip(snap.slots, snap.me.starters):
             if not pid:
-                loose.append((snap, slot, None, "empty slot, nobody is in it"))
+                if snap.key not in covered:
+                    loose.append((snap, slot, None, "empty slot, nobody is in it"))
                 continue
             ko = snap.kickoffs.get(snap.p(pid).team)
             why = _decision(snap, slot, pid)
             if snap.p(pid).bye or not ko:
-                loose.append((snap, slot, pid, why or "no kickoff time"))
+                if snap.key not in covered:
+                    loose.append((snap, slot, pid, why or "no kickoff time"))
                 continue
             slates.setdefault(ko.astimezone(LOCAL_TZ) if ko.tzinfo else ko, []).append((snap, slot, pid, why))
     if not slates and not loose:
@@ -372,12 +396,14 @@ def agenda_card(snaps, now):
     for ko in sorted(slates):
         group = slates[ko]
         past = ko <= now
-        todo = [(sn, sl, pid, w) for sn, sl, pid, w in group if w]
+        todo = [(sn, sl, pid, w) for sn, sl, pid, w in group if w and sn.key not in covered]
+        todo += [(sn, None, None, "see Do now") for sn in {sn.key: sn for sn, _, _, w in group if w and sn.key in covered}.values()]
         leagues = sorted({sn.key for sn, _, _, _ in group})
         if past:
             what = "started" if not todo else "too late to change"
         elif todo:
-            what = "".join(f'<li><span class="lg">{esc(sn.key)}</span>{esc(sn.label(pid))} ({esc(sl)}) {esc(w)}</li>'
+            what = "".join(f'<li><span class="lg">{esc(sn.key)}</span>'
+                           + (f'{esc(sn.label(pid))} ({esc(sl)}) ' if pid else "") + f'{esc(w)}</li>'
                            for sn, sl, pid, w in todo)
             what = f"<ul>{what}</ul>"
         else:
@@ -406,7 +432,8 @@ def league_card(snap, report):
         sub += f" · next: {esc(snap.next_opp)}"
     parts = [f'<section class="card"><h2>{esc(snap.name)}</h2><div class="sub">{sub} · Week {snap.week}</div>']
     if issues:
-        parts.append(f'<div class="issues">⚠️ {esc(", ".join(issues))}. Details in the report below.</div>')
+        hint = "Steps under Do now." if core.todo_moves(snap) else "Details in the report below."
+        parts.append(f'<div class="issues">⚠️ {esc(", ".join(issues))}. {hint}</div>')
     else:
         parts.append('<div class="issues ok">✅ Lineup is set. Nothing to fix right now.</div>')
     def playing(team):
@@ -449,7 +476,7 @@ def league_card(snap, report):
 
 def render(snaps, reports, failures=()):
     now = datetime.now(LOCAL_TZ)
-    cards = agenda_card(snaps, now) + "".join(league_card(s, reports.get(s.key)) for s in snaps)
+    cards = donow_card(snaps) + agenda_card(snaps, now) + "".join(league_card(s, reports.get(s.key)) for s in snaps)
     cross = core.section_exposure(snaps) + core.section_projection_gaps(snaps)
     extra = ""
     if cross:

@@ -225,14 +225,20 @@ def effective(snap: Snapshot):
     return lambda pid: snap.pts(pid) if pid and startable(snap, pid) else 0.0
 
 
-def section_lineup(snap: Snapshot):
-    lines, issues = [], []
+def best_lineup(snap: Snapshot):
+    """Optimal lineup with kickoff-locked players held in place: (best, current total, best total)."""
     starters = snap.me.starters
     eff = effective(snap)
     fixed = {i: pid for i, pid in enumerate(starters) if pid and snap.locked(pid)}
     locked_bench = {p for p in snap.me.players if p not in starters and snap.locked(p)}
     best = optimize(snap, snap.me.players, snap.slots, fixed=fixed, exclude=locked_bench)
-    cur_total, best_total = total(snap, starters, key=eff), total(snap, best, key=eff)
+    return best, total(snap, starters, key=eff), total(snap, best, key=eff)
+
+
+def section_lineup(snap: Snapshot):
+    lines, issues = [], []
+    starters = snap.me.starters
+    best, cur_total, best_total = best_lineup(snap)
     gain = best_total - cur_total
     to_start = [p for p in best if p and p not in starters]
     to_sit = [p for p in starters if p and p not in best]
@@ -252,8 +258,10 @@ def section_lineup(snap: Snapshot):
     return lines, issues, best
 
 
-def section_free_agents(snap: Snapshot, best):
-    lines, issues, fa_lines = [], [], []
+def fa_pickups(snap: Snapshot, best):
+    """This week's free agents worth adding: [(slot or None, floor pid or None, [fa pids, best first])], plus the
+    bench players to drop, weakest first."""
+    picks = []
     for pos in POSITIONS:
         elig_slots = [(s, p) for s, p in zip(snap.slots, best) if pos in slot_eligible(s)]
         if not elig_slots:
@@ -264,18 +272,55 @@ def section_free_agents(snap: Snapshot, best):
         floor_val = 0.0 if empty else snap.pts(floor)
         fas = sorted((p for p in snap.free_agents if snap.p(p).pos == pos and startable(snap, p) and not snap.locked(p)),
                      key=snap.pts, reverse=True)[:2]
-        for fa in fas:
-            if snap.pts(fa) - floor_val >= FA_MIN_GAIN:
-                target = f"empty {empty[0]}" if empty else short(snap, floor)
-                fa_lines.append(f"{short(snap, fa)} > {target}")
+        fas = [fa for fa in fas if snap.pts(fa) - floor_val >= FA_MIN_GAIN]
+        if fas:
+            picks.append((empty[0] if empty else None, floor, fas))
+    bench = sorted((p for p in snap.me.players if p not in best), key=lambda p: snap.p(p).season_avg or snap.pts(p))
+    return picks, bench
+
+
+def section_free_agents(snap: Snapshot, best):
+    lines, issues = [], []
+    picks, bench = fa_pickups(snap, best)
+    fa_lines = [f"{short(snap, fa)} > {f'empty {slot}' if slot else short(snap, floor)}"
+                for slot, floor, fas in picks for fa in fas]
     if fa_lines:
         lines.append("➕ FA: " + "; ".join(fa_lines))
-        bench = [p for p in snap.me.players if p not in best]
         if bench:
-            weakest = min(bench, key=lambda p: snap.p(p).season_avg or snap.pts(p))
-            lines.append(f"  drop {short(snap, weakest, pts=False)}")
+            lines.append(f"  drop {short(snap, bench[0], pts=False)}")
         issues.append(plural(len(fa_lines), "FA pickup"))
     return lines, issues
+
+
+def todo_moves(snap: Snapshot):
+    """The check report's fixes as plain steps, in the order to make them: [(verb, text)]."""
+    starters = snap.me.starters
+    best, cur_total, best_total = best_lineup(snap)
+    swap = best_total - cur_total >= SWAP_MIN_GAIN
+    to_sit = [p for p in starters if p and p not in best] if swap else []
+    to_start = [p for p in best if p and p not in starters] if swap else []
+    picks, bench = fa_pickups(snap, best)
+    drops, adds = list(bench), []
+    for slot, floor, fas in picks:
+        # A K or DEF sitting out this week is the one a streamer replaces; anyone else, drop the weakest bench player.
+        same = next((p for p in to_sit if snap.p(p).pos == snap.p(fas[0]).pos in ("K", "DEF")), None)
+        drop = same or (drops[0] if drops else None)
+        if drop in drops:
+            drops.remove(drop)
+        alt = f" (or {short(snap, fas[1])})" if len(fas) > 1 else ""
+        where = f" for the empty {slot}" if slot else f" over {short(snap, floor)}"
+        adds.append((f"{short(snap, fas[0])}{alt}{where}" + (f", drop {short(snap, drop, pts=False)}" if drop else ""), drop))
+    steps = []
+    sat = list(to_sit)
+    for pid in to_start:
+        # pair each new starter with the benched starter whose slot he could take
+        out = next((o for o in sat if snap.p(pid).positions() & slot_eligible(snap.slots[starters.index(o)])), None)
+        if out:
+            sat.remove(out)
+        steps.append(("Start", short(snap, pid) + (f" over {short(snap, out)}" if out else "")))
+    dropped = {d for _, d in adds}
+    steps += [("Bench", short(snap, p)) for p in sat if p not in dropped]
+    return steps + [("Add", t) for t, _ in adds]
 
 
 def section_opponent(snap: Snapshot, best_total):

@@ -103,7 +103,8 @@ def build(mode="check", week=None) -> Snapshot:
     # any other day, which is when the dashboard is read.
     claim_week = week if mode == "waivers" else week + 1
     proj_next = load_projections(season, claim_week, key) if want_next else {}
-    proj_season = load_projections(season, None, key) if want_next else {}
+    # check needs season averages too: they pick the drop for a free-agent add
+    proj_season = load_projections(season, None, key) if mode in ("check", "waivers", "dashboard") else {}
 
     sched = sleeper_schedule(season)
     this_week = sched.get(week, {})
