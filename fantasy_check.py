@@ -193,6 +193,10 @@ def main():
 
     if args.mode == "dashboard":
         import dashboard
+        import nfl
+        left = nfl.game_left(snaps[0].week) if snaps else {}  # game clocks for the win odds
+        for snap in snaps:
+            snap.game_left = left
         reports = {s.key: core.report_check(s) for s in snaps}  # (lines, issues)
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)

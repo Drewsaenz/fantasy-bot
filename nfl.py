@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import requests
 
 SLEEPER_SCHEDULE = "https://api.sleeper.app/schedule/nfl/regular/{season}"  # undocumented
+ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"  # public, no key
 TEAM_ALIASES = {"WSH": "WAS", "JAC": "JAX", "LA": "LAR", "OAK": "LV", "SD": "LAC"}
 
 
@@ -25,6 +26,29 @@ def sleeper_schedule(season):
         home, away = norm_team(g.get("home")), norm_team(g.get("away"))
         for t, o, is_home in ((home, away, True), (away, home, False)):
             out.setdefault(w, {})[t] = {"opp": o, "home": is_home, "status": g.get("status"), "date": g.get("date")}
+    return out
+
+
+def game_left(week):
+    """team -> fraction of regulation still to play this week (1.0 before kickoff, 0.0 final). Empty on failure."""
+    try:
+        events = requests.get(ESPN_SCOREBOARD, params={"seasontype": 2, "week": week}, timeout=30).json().get("events", [])
+    except Exception as e:  # noqa: BLE001
+        print(f"warning: ESPN scoreboard failed: {e}", file=sys.stderr)
+        return {}
+    out = {}
+    for e in events:
+        c = e["competitions"][0]
+        st = c.get("status", {})
+        state, period, clock = st.get("type", {}).get("state"), int(st.get("period") or 0), float(st.get("clock") or 0)
+        if state == "pre":
+            left = 1.0
+        elif state == "post":
+            left = 0.0
+        else:  # overtime counts its own clock against a full game
+            left = ((4 - period) * 900 + clock if period <= 4 else clock) / 3600
+        for t in c.get("competitors", []):
+            out[norm_team(t["team"]["abbreviation"])] = max(0.0, min(1.0, left))
     return out
 
 

@@ -3,6 +3,7 @@ Platform-neutral model and report sections shared by the Sleeper and ESPN adapte
 
 Slot vocabulary is Sleeper's: QB RB WR TE K DEF FLEX WRRB_FLEX REC_FLEX SUPER_FLEX.
 """
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,8 @@ SWAP_MIN_GAIN = 0.5    # ignore lineup swaps worth less than this (projection no
 WAIVER_MIN_GAIN = 1.5  # waiver target must beat your drop candidate's season average by this much
 PROJ_DISAGREE = 3.0    # flag Sleeper vs ESPN projection gaps of this size
 PROJ_DROP = 0.30       # watch mode: projection fell by this fraction since the last poll
+WIN_SD = (0.4, 2.5)    # win odds: a starter's weekly sd ~ 0.4 x projection + 2.5 pts (team sd ~24 in full PPR)
+GAME_MINUTES = 190     # win odds: wall-clock length of a game, for guessing time left when the scoreboard is missing
 PREGAME_WINDOW = (60, 120)  # watch mode: minutes before kickoff to nudge about a starter; inactives post at T-90
 BYE_LOOKAHEAD = 2      # weeks
 
@@ -86,6 +89,7 @@ class Snapshot:
     # dashboard
     standings: list = field(default_factory=list)   # dicts: name, record, pf, extra, is_me
     history: list = field(default_factory=list)     # dicts: week, mine, theirs, opp
+    game_left: dict = field(default_factory=dict)   # team -> fraction of regulation left (win odds)
 
     # ---- helpers ----
     def p(self, pid) -> Player:
@@ -664,6 +668,32 @@ def game_state(snap: Snapshot, pid, now=None):
     if ko and (now or _now(ko)) >= ko:
         return "live"
     return "pre"
+
+
+def win_prob(snap: Snapshot, now=None):
+    """Chance my starters outscore the opponent's, or None with no matchup. Each unfinished starter adds his
+    projection scaled by the game time left, with normal error whose variance shrinks the same way."""
+    if not snap.opp:
+        return None
+    diff = var = 0.0
+    for sign, team in ((1, snap.me), (-1, snap.opp)):
+        for pid in team.starters:
+            if not pid:
+                continue
+            state, p = game_state(snap, pid, now), snap.p(pid)
+            if state != "pre":
+                diff += sign * (p.actual or 0.0)
+            if state == "final" or not startable(snap, pid) or p.pts <= 0:
+                continue
+            left = 1.0 if state == "pre" else snap.game_left.get(p.team)
+            if left is None:
+                ko = snap.kickoffs.get(p.team)
+                left = 0.5 if not ko else max(0.05, 1 - ((now or _now(ko)) - ko).total_seconds() / 60 / GAME_MINUTES)
+            diff += sign * p.pts * left
+            var += (WIN_SD[0] * p.pts + WIN_SD[1]) ** 2 * left
+    if var <= 0:
+        return 1.0 if diff > 0 else 0.0 if diff < 0 else 0.5
+    return 0.5 * (1 + math.erf(diff / math.sqrt(2 * var)))
 
 
 def section_live(snap: Snapshot, state: dict):

@@ -57,6 +57,10 @@ main { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,520px
 .score .side.lead .big { color:var(--good); }
 .score .proj { color:var(--muted); font-size:12px; }
 .score .vs { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+.score .odds { text-align:center; flex:none; }
+.score .odds b { display:block; font-size:20px; font-weight:640; color:var(--ink); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.score .odds.fav b { color:var(--good); } .score .odds.dog b { color:var(--bad); }
+.score .odds span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
 table { width:100%; border-collapse:collapse; font-size:14px; }
 th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; }
 tbody tr:last-child td { border-bottom:0; }
@@ -417,6 +421,15 @@ def agenda_card(snaps, now):
             f'<th>To do</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></section>')
 
 
+def odds_html(p):
+    """Middle of the score box: my chance to win, or plain "vs" with no matchup."""
+    if p is None:
+        return '<div class="vs">vs</div>'
+    pct = "<1%" if 0 < p < 0.005 else ">99%" if 0.995 < p < 1 else f"{p:.0%}"
+    cls = " fav" if p >= 0.505 else " dog" if p < 0.495 else ""
+    return f'<div class="odds{cls}"><b>{esc(pct)}</b><span>to win</span></div>'
+
+
 def league_card(snap, report):
     report_text, issues = ("\n".join(report[0]), report[1]) if report else ("", [])
     act = lambda pid: (snap.p(pid).actual or 0.0) if pid and core.game_state(snap, pid) != "pre" else 0.0  # noqa: E731
@@ -454,7 +467,7 @@ def league_card(snap, report):
     parts.append(
         '<div class="score">'
         f'<div class="side{lead}"><div class="big">{my_big:.1f}</div><div class="proj">{my_sub}{playing(snap.me)}</div></div>'
-        '<div class="vs">vs</div>'
+        f'{odds_html(core.win_prob(snap))}'
         f'<div class="side them{them_lead}"><div class="big">{opp_big:.1f}</div><div class="proj">{opp_sub}{playing(opp)}</div></div>'
         '</div>')
     if opp:
