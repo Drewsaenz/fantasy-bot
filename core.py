@@ -347,12 +347,11 @@ def section_byes(snap: Snapshot):
     parts = []
     for w in sorted(by_week):
         pids = sorted(by_week[w], key=snap.pts, reverse=True)
-        out_pos = {}
-        for pid in pids:
-            out_pos[snap.p(pid).pos] = out_pos.get(snap.p(pid).pos, 0) + 1
         short_pos = []
-        for pos, n in out_pos.items():
-            have = sum(1 for p in snap.me.players if snap.p(p).pos == pos and startable(snap, p)) - n
+        for pos in {snap.p(pid).pos for pid in pids}:
+            # this week's bye (p.bye) doesn't matter for week w, so not startable()
+            have = sum(1 for p in snap.me.players if snap.p(p).pos == pos
+                       and snap.p(p).status not in BAD_STATUSES and snap.byes.get(snap.p(p).team) != w)
             if have < sum(1 for s in snap.slots if s == pos):
                 short_pos.append(pos)
         names = ", ".join(short(snap, p, pts=False, status=False) for p in pids)
