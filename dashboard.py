@@ -311,6 +311,7 @@ def waivers_block(snap):
     if not drop or not rows:
         return ""
     d = snap.p(drop)
+    scoring = f"scoring {d.ppg:.1f}/g, " if d.ppg is not None else ""
     trs = []
     for r in rows:
         p = snap.p(r["pid"])
@@ -321,7 +322,7 @@ def waivers_block(snap):
         trs.append(f'<tr><td>{r["pos"]}</td><td>{name}{bye}{flag}</td><td class="num">{p.pts_next:.1f}</td>'
                    f'<td class="num">{p.season_avg:.1f}</td><td class="num">{own}</td></tr>')
     return (f"<h3>Waiver targets · week {snap.week + 1}</h3>"
-            f'<div class="sub">Drop candidate: {esc(snap.label(drop))} (season avg {d.season_avg:.1f}, next week {d.pts_next:.1f}). '
+            f'<div class="sub">Drop candidate: {esc(snap.label(drop))} ({scoring}season avg {d.season_avg:.1f}, next week {d.pts_next:.1f}). '
             f'"claim" beats both your drop and your worst at that position.</div>'
             '<div class="scroll"><table><thead><tr><th>Pos</th><th>Player</th><th class="num">Next wk</th><th class="num">Season</th><th class="num">Owned</th></tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table></div>')

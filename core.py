@@ -45,10 +45,17 @@ class Player:
     bye: bool = False                 # on bye this week
     owned_pct: Optional[float] = None
     note: str = ""                    # injury detail when the platform has it
-    trend: list = field(default_factory=list)  # actual points by week, None where unrostered / no data (dashboard)
+    trend: list = field(default_factory=list)  # actual points by week, None where unrostered / no data
+    proj_missing: bool = False        # the platform has no projection for him this week
 
     def positions(self):
         return {self.pos}
+
+    @property
+    def ppg(self):
+        """Actual points per game this season, counting weeks above 0 (zeros are mostly byes and DNPs). None before he has played."""
+        games = [v for v in self.trend if v]
+        return sum(games) / len(games) if games else None
 
 
 @dataclass
@@ -139,6 +146,22 @@ def slot_order(slots):
                   key=lambda i: (slots[i] in flex, flex.index(slots[i]) if slots[i] in flex else 0))
 
 
+def fill_missing_projections(players: dict, pids):
+    """A healthy player with no projection this week is unknown, not 0: count his actual points per game,
+    else his season projection. Only for rostered pids, so a free agent never gets a made-up number."""
+    for pid in pids:
+        p = players.get(pid)
+        if p and p.proj_missing and not p.bye and p.status not in BAD_STATUSES:
+            p.pts = p.ppg or p.season_avg
+
+
+def drop_value(snap: Snapshot, pid):
+    """What a bench player is worth keeping: actual points per game once he has played, else his season projection.
+    Season projections are mostly preseason, so they keep a player who has stopped producing."""
+    p = snap.p(pid)
+    return p.ppg if p.ppg is not None else (p.season_avg or p.pts)
+
+
 def startable(snap: Snapshot, pid):
     p = snap.p(pid)
     return p.status not in BAD_STATUSES and not p.bye
@@ -214,6 +237,9 @@ def section_alerts(snap: Snapshot):
             (locked_bad if snap.locked(pid) else alerts).append(f"{slot} {short(snap, pid, pts=False)}{problem}")
         elif p.status == "Questionable":
             watch.append(short(snap, pid, pts=False, status=False))
+    guessed = [p for p in snap.me.players if snap.p(p).proj_missing and snap.pts(p)]
+    if guessed:
+        lines.append("❔ No projection, counting avg: " + ", ".join(short(snap, p) for p in guessed))
     if alerts:
         lines.append("🚨 Fix: " + ", ".join(alerts))
         issues.append(plural(len(alerts), "starter alert"))
@@ -279,7 +305,7 @@ def fa_pickups(snap: Snapshot, best):
         fas = [fa for fa in fas if snap.pts(fa) - floor_val >= FA_MIN_GAIN]
         if fas:
             picks.append((empty[0] if empty else None, floor, fas))
-    bench = sorted((p for p in snap.me.players if p not in best), key=lambda p: snap.p(p).season_avg or snap.pts(p))
+    bench = sorted((p for p in snap.me.players if p not in best), key=lambda p: drop_value(snap, p))
     return picks, bench
 
 
@@ -462,7 +488,7 @@ def waiver_targets(snap: Snapshot, per_pos=3):
         return None, []
     value = lambda pid: waiver_value(snap, pid)  # noqa: E731
     skill_bench = [p for p in bench if snap.p(p).pos not in ("K", "DEF")] or bench
-    drop = min(skill_bench, key=value)
+    drop = min(skill_bench, key=lambda p: drop_value(snap, p))
     rows = []
     for pos in POSITIONS:
         pool = [p for p in snap.free_agents if snap.p(p).pos == pos and snap.p(p).status not in BAD_STATUSES]
@@ -483,7 +509,8 @@ def section_waivers(snap: Snapshot):
     if not drop:
         return lines + ["No bench players to drop."], issues
     d = snap.p(drop)
-    lines.append(f"Drop candidate: {snap.label(drop)} (season avg {d.season_avg:.1f}, wk {cw} {d.pts_next:.1f})")
+    scoring = f"scoring {d.ppg:.1f}/g, " if d.ppg is not None else ""
+    lines.append(f"Drop candidate: {snap.label(drop)} ({scoring}season avg {d.season_avg:.1f}, wk {cw} {d.pts_next:.1f})")
     lines.append("")
     claims = 0
     for pos in POSITIONS:

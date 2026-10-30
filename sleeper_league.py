@@ -7,7 +7,7 @@ from pathlib import Path
 
 import requests
 
-from core import BYE_LOOKAHEAD, POSITIONS, Player, Snapshot, Team
+from core import BYE_LOOKAHEAD, POSITIONS, Player, Snapshot, Team, fill_missing_projections
 from nfl import byes_from, norm_team, sleeper_schedule
 
 BASE = "https://api.sleeper.app/v1"
@@ -121,6 +121,7 @@ def build(mode="check", week=None) -> Snapshot:
             pid=pid, name=name, pos=pos, team=team,
             status=fresh_status[pid] if pid in fresh_status else (p.get("injury_status") or None),
             pts=proj.get(pid, 0.0),
+            proj_missing=pid not in proj,
             pts_next=proj_next.get(pid, 0.0),
             season_avg=proj_season.get(pid, 0.0) / GAMES_PER_SEASON,
             bye=bool(this_week) and team not in this_week and team != "FA",
@@ -225,6 +226,9 @@ def build(mode="check", week=None) -> Snapshot:
             snap.next_opp = ot.name if ot else ""
         except (StopIteration, requests.RequestException):
             pass
+
+    # Weekly actuals: the dashboard trend line, and points per game for the drop pick and missing projections.
+    if mode in ("check", "waivers", "dashboard"):
         weekly = {}  # pid -> {week: pts} for every player rostered by anyone that week
         for w in range(1, week):
             try:
@@ -243,6 +247,7 @@ def build(mode="check", week=None) -> Snapshot:
         for pid, byweek in weekly.items():
             if pid in players:
                 players[pid].trend = [byweek.get(w) for w in range(1, week)]
+        fill_missing_projections(players, rostered)
 
     # recap: last week
     if mode == "recap" and week > 1:

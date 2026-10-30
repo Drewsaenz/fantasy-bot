@@ -193,11 +193,8 @@ def build(mode="check", week=None) -> Snapshot:
         except Exception as e:  # noqa: BLE001
             print(f"warning: ESPN recent activity failed: {e}", file=sys.stderr)
 
-    if mode == "dashboard":
-        for t, team in zip(lg.teams, teams):
-            snap.standings.append({"name": team.name, "record": team.record, "pf": float(t.points_for or 0),
-                                   "extra": team.extra, "is_me": team.tid == me.tid})
-        snap.standings.sort(key=lambda d: (-int(d["record"].split("-")[0]), -d["pf"]))
+    # Weekly actuals: the dashboard trend line, and points per game for the drop pick.
+    if mode in ("check", "waivers", "dashboard"):
         try:  # weekly actuals for your roster and the opponent's, one batched lookup
             ids = [int(pid) for t in (me, snap.opp) if t for pid in set(t.players) | {p for p in t.starters if p} if pid.lstrip("-").isdigit()]
             infos = lg.player_info(playerId=ids) or []
@@ -207,6 +204,12 @@ def build(mode="check", week=None) -> Snapshot:
                     cp.trend = [(pi.stats.get(w) or {}).get("points") for w in range(1, week)]
         except Exception as e:  # noqa: BLE001
             print(f"warning: ESPN player trends failed: {e}", file=sys.stderr)
+
+    if mode == "dashboard":
+        for t, team in zip(lg.teams, teams):
+            snap.standings.append({"name": team.name, "record": team.record, "pf": float(t.points_for or 0),
+                                   "extra": team.extra, "is_me": team.tid == me.tid})
+        snap.standings.sort(key=lambda d: (-int(d["record"].split("-")[0]), -d["pf"]))
         mine_t = next(t for t in lg.teams if t.team_id == team_id)
         if len(mine_t.schedule) > week:
             snap.next_opp = getattr(mine_t.schedule[week], "team_name", "")

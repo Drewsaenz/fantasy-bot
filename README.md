@@ -34,14 +34,14 @@ Add `--notify` for a macOS banner and `--slack` to post the report to Slack.
 
 **check** (every morning at 8 except Tuesday, Thu 4 PM, Sun 11:30 AM, Central)
 1. Starters who are Out / IR / Doubtful / suspended, on bye, projected 0, or empty slots. Questionable starters listed to watch.
-2. Optimal lineup vs what is set, if the gain is 0.5 or more. Players whose game has kicked off are locked: locked starters stay, locked bench players are not suggested.
-3. Free agents beating your weakest eligible starter by 1.5 or more.
+2. Optimal lineup vs what is set, if the gain is 0.5 or more. A healthy rostered player with no Sleeper projection this week counts his actual points per game instead of 0, and the report lists him under "No projection". Players whose game has kicked off are locked: locked starters stay, locked bench players are not suggested.
+3. Free agents beating your weakest eligible starter by 1.5 or more, with the bench player to drop: the one scoring the fewest actual points per game this season (weeks above 0), or the lowest season projection for anyone who hasn't played. Season projections are mostly preseason, so they would keep a player who has stopped producing.
 4. Opponent's projected total, record, and holes in their lineup.
 5. Byes in the next two weeks and whether you'd be short at a position.
 6. Across leagues: players on both rosters, and players where Sleeper and ESPN projections differ by 3 or more (K and D/ST excluded, their scoring differs).
 
 **waivers** (Tue 8 PM, before waivers process overnight)
-- Top three free agents per position by projection for the week the claim would play (this coming week on waiver night, since claims process overnight) and season average, with ESPN ownership where available. "claim" means it beats both your drop candidate and your worst player at that position by 1.5 on a blended value (60% season average, 40% next week).
+- Top three free agents per position by projection for the week the claim would play (this coming week on waiver night, since claims process overnight) and season average, with ESPN ownership where available. "claim" means it beats both your drop candidate and your worst player at that position by 1.5 on a blended value (60% season average, 40% next week). The drop candidate is picked the same way as in the check.
 - Trade ideas: your depth vs league average at QB / RB / WR / TE, and the teams whose surplus matches your need.
 - Upcoming byes.
 
