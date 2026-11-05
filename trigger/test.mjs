@@ -1,6 +1,6 @@
 // node test.mjs: the schedule table against known instants (CDT in October, CST in November).
 import assert from "node:assert/strict";
-import { dueJobs, central } from "./src/worker.js";
+import { dueJobs, central, missedInARow } from "./src/worker.js";
 
 const cases = [
   ["2026-10-02T13:00:00Z", ["check"],          "Fri 08:00 CDT morning report"],
@@ -27,6 +27,18 @@ for (const [iso, want, why] of cases) {
   const expect = want;
   try { assert.deepEqual(got, expect); console.log("ok  ", iso, why); }
   catch { failed++; console.log("FAIL", iso, why, "got", got, "want", expect); }
+}
+// missedInARow: watch/live only warn once WARN_AFTER (3) slots in a row have come and gone without a run.
+const misses = [
+  ["watch", "2026-11-05T16:10:00Z", "2026-11-05T15:40:36Z", 1, "Thu 10:10 CST, the 09:40 watch ran"],
+  ["watch", "2026-11-05T17:10:00Z", "2026-11-05T15:40:36Z", 3, "10:10, 10:40, 11:10 all missed"],
+  ["live",  "2026-11-08T18:00:00Z", "2026-11-06T06:50:30Z", 1, "Sun 12:00, first live tick since Thu night's game"],
+  ["live",  "2026-11-08T18:20:00Z", "2026-11-06T06:50:30Z", 3, "Sun 12:00-12:20 missed"],
+];
+for (const [job, iso, last, want, why] of misses) {
+  const got = missedInARow(job, new Date(iso), Date.parse(last));
+  if (got === want) console.log("ok  ", iso, why);
+  else { failed++; console.log("FAIL", iso, why, "got", got, "want", want); }
 }
 const c = central(new Date("2026-10-02T13:00:00Z"));
 assert.deepEqual(c, { dow: 5, minutes: 480 });

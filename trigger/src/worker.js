@@ -15,13 +15,22 @@
 const TICK_MIN = 10; // must match the cron in wrangler.toml
 const TZ = "America/Chicago";
 
+// repeats: the next tick covers a missed one, so a failed start only warns once it has happened
+// WARN_AFTER slots in a row. The reports run once per slot and warn on the first miss.
 export const JOBS = {
   check:   { workflow: "check.yml",   label: "lineup check" },
   waivers: { workflow: "waivers.yml", label: "waiver report" },
   recap:   { workflow: "recap.yml",   label: "weekly recap" },
-  live:    { workflow: "live.yml",    label: "live update" },
-  watch:   { workflow: "watch.yml",   label: "status watch" },
+  live:    { workflow: "live.yml",    label: "live update",  repeats: true },
+  watch:   { workflow: "watch.yml",   label: "status watch", repeats: true },
 };
+const WARN_AFTER = 3;
+
+// GitHub's dispatch API has 500'd for a minute or more at a time with nothing on githubstatus
+// (Nov 2026), so scheduled starts keep trying for about two minutes. A Telegram command keeps the
+// short list: its handler runs under waitUntil, which is cut off about 30 seconds after the reply.
+const RETRY_SCHEDULED = [0, 5000, 15000, 30000, 60000];
+const RETRY_COMMAND = [0, 3000, 8000];
 
 // Central-time weekly schedule. days: 0=Sun .. 6=Sat. `at` fires once; `every` fires on that minute
 // interval inside [from, to), which defaults to the whole day. DST is handled by asking Intl for the
@@ -96,10 +105,10 @@ const actionsUrl = (env, job) => `https://github.com/${env.GITHUB_REPO}/actions/
 
 // Start a workflow. GitHub answers 204 at once and the run appears within a few seconds; the workflow
 // posts its own report to Telegram, so nothing more is needed here.
-async function dispatch(env, job) {
+async function dispatch(env, job, waits = RETRY_COMMAND) {
   const url = `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${JOBS[job].workflow}/dispatches`;
   let last = "";
-  for (const wait of [0, 3000, 8000]) {
+  for (const wait of waits) {
     if (wait) await new Promise((r) => setTimeout(r, wait));
     try {
       const r = await fetch(url, { method: "POST", headers: ghHeaders(env), body: JSON.stringify({ ref: env.GITHUB_REF || "main" }) });
@@ -112,6 +121,23 @@ async function dispatch(env, job) {
   }
   console.log(`dispatch ${job} failed: ${last}`);
   return { ok: false, error: last };
+}
+
+// How many of this job's slots in a row, ending with the tick at `when`, came after its last run
+// started (lastRunMs), so had nothing to show for them. Looks back at most a week.
+export function missedInARow(job, when, lastRunMs, schedule = SCHEDULE) {
+  const floor = Math.max(lastRunMs, when.getTime() - 7 * 24 * 3600e3);
+  let n = 0;
+  for (let t = when.getTime(); t > floor; t -= TICK_MIN * 60e3) if (dueJobs(new Date(t), schedule).includes(job)) n++;
+  return n;
+}
+
+async function lastRunMs(env, job) {
+  const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${JOBS[job].workflow}/runs?per_page=1`,
+    { headers: ghHeaders(env) });
+  if (!r.ok) return null;
+  const run = (await r.json()).workflow_runs?.[0];
+  return run ? Date.parse(run.created_at) : 0;
 }
 
 async function tg(env, text) {
@@ -163,8 +189,17 @@ export default {
     const jobs = dueJobs(when);
     console.log(`${when.toISOString()} due: ${jobs.join(", ") || "nothing"}`);
     for (const job of jobs) {
-      const r = await dispatch(env, job);
-      if (!r.ok) await tg(env, `⚠️ Couldn't start the ${JOBS[job].label} (${r.error}). Run it by hand: ${actionsUrl(env, job)}`);
+      const r = await dispatch(env, job, RETRY_SCHEDULED);
+      if (r.ok) continue;
+      let times = "";
+      if (JOBS[job].repeats) {
+        const last = await lastRunMs(env, job); // null: GitHub won't say either, so warn
+        const n = last === null ? WARN_AFTER : missedInARow(job, when, last);
+        console.log(`${job}: ${n} missed in a row`);
+        if (n < WARN_AFTER) continue;
+        times = ` ${n} times in a row`;
+      }
+      await tg(env, `⚠️ Couldn't start the ${JOBS[job].label}${times} (${r.error}). Run it by hand: ${actionsUrl(env, job)}`);
     }
   },
 
