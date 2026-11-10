@@ -3,7 +3,7 @@ name: claims
 # Waiver claim results the moment they process: every 10 minutes 02:00-04:00 Central, every day
 # (ESPN runs the Tuesday-night batch at 02:00 Wednesday, and claims on dropped players clear on
 # other nights). Silent until one of your claims succeeds or fails. Dispatched by the Cloudflare
-# Worker under trigger/, like the other jobs.
+# Worker under trigger/, like the other jobs. Telegram: /claims runs it by hand.
 on:
   workflow_dispatch:
 
