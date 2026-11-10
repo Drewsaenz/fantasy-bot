@@ -23,6 +23,7 @@ export const JOBS = {
   recap:   { workflow: "recap.yml",   label: "weekly recap" },
   live:    { workflow: "live.yml",    label: "live update",  repeats: true },
   watch:   { workflow: "watch.yml",   label: "status watch", repeats: true },
+  claims:  { workflow: "claims.yml",  label: "waiver claims check", repeats: true },
 };
 const WARN_AFTER = 3;
 
@@ -45,6 +46,7 @@ export const SCHEDULE = [
   { job: "live",    days: [0],                from: "12:00", to: "24:00", every: 10 },  // Sunday
   { job: "live",    days: [4, 1],             from: "19:00", to: "24:00", every: 10 },  // Thu and Mon night
   { job: "live",    days: [5, 1, 2],          from: "00:00", to: "01:00", every: 10 },  // games that run past midnight
+  { job: "claims",  days: [0, 1, 2, 3, 4, 5, 6], from: "02:00", to: "04:00", every: 10 }, // ESPN processes waivers at 02:00
 ];
 
 // Telegram command (or plain word) -> job
@@ -54,6 +56,7 @@ const COMMANDS = {
   recap: "recap",
   live: "live", score: "live", scores: "live",
   watch: "watch",
+  claims: "claims",
 };
 
 const HELP = [
@@ -62,6 +65,7 @@ const HELP = [
   "/recap: last week's recap",
   "/live: score update (only says anything during games)",
   "/watch: injury and projection changes, pre-kickoff nudges",
+  "/claims: waiver claim results (only says anything once a claim has processed)",
   "/status: last run of each job",
   "/dashboard: the link",
 ].join("\n");

@@ -8,3 +8,4 @@ dashboard.html
 trigger/node_modules/
 trigger/.wrangler/
 trigger/.dev.vars
+claims_state.json

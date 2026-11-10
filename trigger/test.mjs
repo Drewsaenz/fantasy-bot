@@ -20,6 +20,10 @@ const cases = [
   ["2026-11-03T14:00:00Z", ["recap"],          "Tue 08:00 CST after fall back"],
   ["2026-11-03T13:00:00Z", [],                 "Tue 07:00 CST, nothing"],
   ["2026-11-04T14:00:00Z", ["check"],          "Wed 08:00 CST"],
+  ["2026-11-11T08:00:00Z", ["claims"],         "Wed 02:00 CST: waivers process"],
+  ["2026-11-11T09:50:00Z", ["claims"],         "Wed 03:50 CST: last claims tick"],
+  ["2026-11-11T10:00:00Z", [],                 "Wed 04:00 CST: claims window closed"],
+  ["2026-11-08T08:10:00Z", ["watch", "claims"], "Sun 02:10 CST: watch and claims share a tick"],
 ];
 let failed = 0;
 for (const [iso, want, why] of cases) {

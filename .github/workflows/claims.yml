@@ -1,0 +1,60 @@
+name: claims
+
+# Waiver claim results the moment they process: every 10 minutes 02:00-04:00 Central, every day
+# (ESPN runs the Tuesday-night batch at 02:00 Wednesday, and claims on dropped players clear on
+# other nights). Silent until one of your claims succeeds or fails. Dispatched by the Cloudflare
+# Worker under trigger/, like the other jobs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Sleeper player list (only read when a Sleeper claim resolved)
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: players-${{ steps.date.outputs.today }}
+
+      - name: Restore claims already reported
+        uses: actions/cache/restore@v4
+        with:
+          path: claims_state.json
+          key: claims-state-${{ github.run_id }}
+          restore-keys: claims-state-
+
+      - name: Claim results to Telegram
+        run: python claims.py --telegram
+        env:
+          SLEEPER_CACHE_DIR: .cache
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          SWID: ${{ secrets.SWID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Save claims reported
+        if: hashFiles('claims_state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: claims_state.json
+          key: claims-state-${{ github.run_id }}
+
+      - if: failure()
+        name: Say so in Telegram
+        run: bash tools/telegram_fail.sh "waiver claims"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
