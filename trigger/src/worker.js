@@ -16,7 +16,7 @@ const TICK_MIN = 10; // must match the cron in wrangler.toml
 const TZ = "America/Chicago";
 
 // repeats: the next tick covers a missed one, so a failed start only warns once it has happened
-// WARN_AFTER slots in a row. The reports run once per slot and warn on the first miss.
+// WARN_AFTER slots in a row, then every 6th miss after that. The reports run once per slot and warn on the first miss.
 export const JOBS = {
   check:   { workflow: "check.yml",   label: "lineup check" },
   waivers: { workflow: "waivers.yml", label: "waiver report" },
@@ -46,7 +46,7 @@ export const SCHEDULE = [
   { job: "live",    days: [0],                from: "12:00", to: "24:00", every: 10 },  // Sunday
   { job: "live",    days: [4, 1],             from: "19:00", to: "24:00", every: 10 },  // Thu and Mon night
   { job: "live",    days: [5, 1, 2],          from: "00:00", to: "01:00", every: 10 },  // games that run past midnight
-  { job: "claims",  days: [0, 1, 2, 3, 4, 5, 6], from: "02:00", to: "04:00", every: 10 }, // ESPN processes waivers at 02:00
+  { job: "claims",  days: [0, 1, 2, 3, 4, 5, 6], from: "02:00", to: "08:00", every: 10 }, // ESPN processes waivers at 02:00; runs to 07:50 so a GitHub outage at 2am still reports before the 8am check
 ];
 
 // Telegram command (or plain word) -> job
@@ -200,7 +200,7 @@ export default {
         const last = await lastRunMs(env, job); // null: GitHub won't say either, so warn
         const n = last === null ? WARN_AFTER : missedInARow(job, when, last);
         console.log(`${job}: ${n} missed in a row`);
-        if (n < WARN_AFTER) continue;
+        if (n < WARN_AFTER || (n - WARN_AFTER) % 6) continue; // then once an hour, not every tick of a long outage
         times = ` ${n} times in a row`;
       }
       await tg(env, `⚠️ Couldn't start the ${JOBS[job].label}${times} (${r.error}). Run it by hand: ${actionsUrl(env, job)}`);

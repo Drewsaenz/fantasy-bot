@@ -10,14 +10,16 @@ batch). Sleeper: transactions/{week} lists waiver claims as complete or failed.
 
   python claims.py                 # print what's new
   python claims.py --telegram      # and send it
-  python claims.py --hours 48      # look further back (default 6 h), e.g. to test against old claims
+  python claims.py --hours 48      # look further back (default 8 h), e.g. to test against old claims
 """
 import argparse
 import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -129,39 +131,51 @@ def sleeper_results(since_ms):
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--hours", type=float, default=6, help="only claims processed in the last N hours")
+    ap.add_argument("--hours", type=float, default=8, help="only claims processed in the last N hours")
     ap.add_argument("--state", default=str(HERE / "claims_state.json"))
     ap.add_argument("--telegram", action="store_true")
     args = ap.parse_args()
 
     path = Path(args.state)
     try:
-        reported = json.loads(path.read_text()).get("reported", [])
+        saved = json.loads(path.read_text())
     except (OSError, ValueError):
-        reported = []
+        saved = {}
+    reported, warned = saved.get("reported", []), saved.get("warned", {})
     since = int((time.time() - args.hours * 3600) * 1000)
+    night = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
 
     sections, failures = [], []
     for label, fn in (("ESPN", espn_results), ("Sleeper", sleeper_results)):
         try:
             new = [(k, line) for k, line in fn(since) if k not in reported]
         except Exception as e:  # noqa: BLE001
-            failures.append(f"{label}: {type(e).__name__}: {e}")
+            failures.append((label, f"{type(e).__name__}: {e}"))
             continue
         if new:
             sections.append((label, new))
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
     print(f"{stamp} mode=claims new={sum(len(s[1]) for s in sections)} failures={len(failures)}", file=sys.stderr)
-    for f in failures:
-        print(f"warning: {f}", file=sys.stderr)
-    if not sections:
-        sys.exit(1 if len(failures) == 2 else 0)
+    for label, err in failures:
+        print(f"warning: {label}: {err}", file=sys.stderr)
 
-    lines = ["*Waivers ran*"]
+    lines = []
     for label, new in sections:
         lines.append(f"*{label}*")
         lines += [line for _, line in new]
+    if lines:
+        lines.insert(0, "*Waivers ran*")
+    # A league that can't be read is said once per night, not on every 10-minute poll; the run itself
+    # stays green so the workflow's failure step doesn't repeat it either.
+    new_warn = [(label, err) for label, err in failures if warned.get(label) != night]
+    for label, err in new_warn:
+        hint = (" Your ESPN cookies (ESPN_S2 / SWID) probably expired: refresh them in the repo secrets."
+                if label == "ESPN" and any(w in err for w in ("AccessDenied", "401", "403", "Unauthorized")) else "")
+        lines.append(f"⚠️ Couldn't read {label} waiver results ({err[:200]}).{hint} Still checking every 10 min until 8am.")
+    if not lines:
+        return
+
     report = "\n".join(lines) + "\n"
     print(report)
     if args.telegram:
@@ -171,8 +185,8 @@ def main():
             print(f"error: Telegram post failed: {e}", file=sys.stderr)
             sys.exit(1)  # state not saved, so the next poll tries again
     reported += [k for _, new in sections for k, _ in new]
-    path.write_text(json.dumps({"reported": reported[-200:]}))
-
+    warned.update({label: night for label, _ in new_warn})
+    path.write_text(json.dumps({"reported": reported[-200:], "warned": warned}))
 
 if __name__ == "__main__":
     main()
