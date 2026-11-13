@@ -27,7 +27,11 @@ def pos_of(p):
 
 
 def status_of(p):
-    return STATUS_MAP.get(getattr(p, "injuryStatus", None) or "")
+    """A status this map doesn't know is shown as ESPN wrote it, never read as healthy."""
+    raw = getattr(p, "injuryStatus", None)
+    if not isinstance(raw, str) or raw in ("", "ACTIVE", "NORMAL"):
+        return None
+    return STATUS_MAP.get(raw) or raw.replace("_", " ").title()
 
 
 def week_proj(p, week):

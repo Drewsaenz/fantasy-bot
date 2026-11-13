@@ -206,7 +206,7 @@ def player_row(snap, slot, pid, bench=False):
     elif snap.byes.get(p.team):
         tags += f'<span class="tag bye">bye wk {snap.byes[p.team]}</span>'
     gs = core.game_state(snap, pid)
-    actual = p.actual if (p.actual is not None and gs != "pre") else None
+    actual = p.actual if (p.actual is not None and gs in ("live", "final")) else None
     act_html = f"{actual:.1f}" if actual is not None else '<span style="color:var(--muted)">–</span>'
     diff_html = signed(actual - p.pts) if actual is not None and gs == "final" else ""
     name = f"{p.team} D/ST" if p.pos == "DEF" else f"{p.name} <span style='color:var(--muted)'>{p.pos}-{p.team}</span>"
@@ -239,7 +239,7 @@ def _h2h_pts(snap, pid):
         return '<span style="color:var(--muted)">–</span>'
     p = snap.p(pid)
     gs = core.game_state(snap, pid)
-    if p.actual is None or gs == "pre":
+    if p.actual is None or gs not in ("live", "final"):
         return '<span style="color:var(--muted)">–</span>'
     return f"{p.actual:.1f}"
 
@@ -433,7 +433,7 @@ def odds_html(p):
 
 def league_card(snap, report):
     report_text, issues = ("\n".join(report[0]), report[1]) if report else ("", [])
-    act = lambda pid: (snap.p(pid).actual or 0.0) if pid and core.game_state(snap, pid) != "pre" else 0.0  # noqa: E731
+    act = lambda pid: (snap.p(pid).actual or 0.0) if pid and core.game_state(snap, pid) in ("live", "final") else 0.0  # noqa: E731
     my_act, my_proj = core.total(snap, snap.me.starters, key=act), core.total(snap, snap.me.starters)
     opp = snap.opp
     opp_act = core.total(snap, opp.starters, key=act) if opp else 0.0
@@ -457,7 +457,7 @@ def league_card(snap, report):
         left = sum(1 for pid in team.starters if pid and core.game_state(snap, pid) == "pre")
         bits = ([f"{n} playing"] if n else []) + ([f"{left} to play"] if left else [])
         return (" · " + ", ".join(bits)) if bits else " · all done"
-    started = any(pid and core.game_state(snap, pid) != "pre"
+    started = any(pid and core.game_state(snap, pid) in ("live", "final")
                   for t in (snap.me, opp) if t for pid in t.starters)
     # Before kickoff the actuals are all 0.0, which reads as a scoreline that hasn't happened; show projections instead.
     my_big, opp_big = (my_act, opp_act) if started else (my_proj, opp_proj)

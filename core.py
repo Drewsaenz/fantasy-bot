@@ -80,7 +80,7 @@ class Snapshot:
     opp: Optional[Team] = None
     free_agents: list = field(default_factory=list)   # pids
     kickoffs: dict = field(default_factory=dict)      # team -> datetime or None
-    game_status: dict = field(default_factory=dict)   # team -> pre_game / in_game / complete / bye
+    game_status: dict = field(default_factory=dict)   # team -> pre_game / in_game / complete (teams on bye are absent)
     byes: dict = field(default_factory=dict)          # team -> next bye week within lookahead
     games: dict = field(default_factory=dict)         # team -> {opp, home, date} this week
     moves: list = field(default_factory=list)         # league transactions: dicts ts, team, action, pid, mine, status, bid
@@ -106,14 +106,9 @@ class Snapshot:
         return self.p(pid).pts if pid else 0.0
 
     def locked(self, pid, now=None):
-        """Game already kicked off (or finished) for this player's team."""
-        if not pid:
-            return False
-        team = self.p(pid).team
-        ko = self.kickoffs.get(team)
-        if ko:
-            return (now or _now(ko)) >= ko
-        return self.game_status.get(team) in ("in_game", "complete")
+        """Game already kicked off (or finished) for this player's team. One answer with game_state():
+        a bye or a postponed game never locks anyone."""
+        return bool(pid) and game_state(self, pid, now) in ("live", "final")
 
     def label(self, pid):
         p = self.p(pid)
@@ -400,6 +395,18 @@ def report_check(snap: Snapshot):
 
 # ---------- watch mode: status and projection changes ----------
 
+def watch_rollover(state: dict, week):
+    """A new week: keep each player's last known status, so a change between Monday night and the first
+    Thursday poll is still reported, but forget projections (a new opponent is not a drop) and the
+    pre-kickoff nudges already sent."""
+    out = {"week": week}
+    for key, sub in state.items():
+        if isinstance(sub, dict) and isinstance(sub.get("players"), dict):
+            out[key] = {"players": {pid: {"status": rec.get("status"), "pts": 0, "base": 0}
+                                    for pid, rec in sub["players"].items() if isinstance(rec, dict)}}
+    return out
+
+
 def section_watch(snap: Snapshot, state: dict):
     """Events since the last poll for your roster and the opponent's starters. Returns (lines, count, new_state)."""
     prev = state.get("players", {})
@@ -410,16 +417,21 @@ def section_watch(snap: Snapshot, state: dict):
     events, new = [], {}
     for pid, role in watch:
         p = snap.p(pid)
-        new[pid] = {"status": p.status, "pts": p.pts}
+        old = prev.get(pid) or {}
+        # base: the highest projection seen since the last alert (or the week began), so a slide spread
+        # over several polls still adds up to a drop instead of resetting every 30 minutes.
+        base = max(old.get("base", old.get("pts", 0)) or 0, p.pts)
+        new[pid] = {"status": p.status, "pts": p.pts, "base": base}
         if first or pid not in prev or snap.locked(pid):
             continue
-        old = prev[pid]
         if old.get("status") != p.status:
             arrow = f"{old.get('status') or 'Healthy'} → {p.status or 'Healthy'}"
             icon = "🚑" if p.status in BAD_STATUSES else "🩺" if p.status else "💪"
             events.append(f"  {icon} {snap.label(pid)} ({role}): {arrow}" + (f". {p.note}" if p.note and p.status else ""))
-        elif old.get("pts", 0) > 0 and p.pts < old["pts"] * (1 - PROJ_DROP):
-            events.append(f"  📉 {snap.label(pid)} ({role}): projection {old['pts']:.1f} → {p.pts:.1f}")
+            new[pid]["base"] = p.pts  # the status line explains the projection move; start over from here
+        elif base > 0 and p.pts < base * (1 - PROJ_DROP):
+            events.append(f"  📉 {snap.label(pid)} ({role}): projection {base:.1f} → {p.pts:.1f}")
+            new[pid]["base"] = p.pts
     lines = [f"*{snap.name}*"] + events if events else []
     return lines, len(events), {"players": new}
 
@@ -682,18 +694,30 @@ def section_projection_gaps(snaps):
 LIVE_JUMP = 6.0  # points gained since the last poll that count as a "big play"
 
 
+GAME_OFF = ("postponed", "canceled", "cancelled", "delayed", "suspended")  # a kickoff time that no longer means anything
+
+
 def game_state(snap: Snapshot, pid, now=None):
-    """pre / live / final for this player's team this week."""
-    team = snap.p(pid).team
-    st = snap.game_status.get(team)
+    """The one place that says where a player's week stands: pre / live / final, or bye when his team has
+    no game this week (bye week, free agent). Nothing is left to wait for after final or bye."""
+    p = snap.p(pid)
+    if p.bye or p.team == "FA":
+        return "bye"
+    st = snap.game_status.get(p.team)
     if st == "complete":
         return "final"
+    if st in GAME_OFF:
+        return "pre"
     if st and st != "pre_game":
         return "live"
-    ko = snap.kickoffs.get(team)
+    ko = snap.kickoffs.get(p.team)
     if ko and (now or _now(ko)) >= ko:
         return "live"
     return "pre"
+
+
+def week_over(snap: Snapshot, pid):
+    return game_state(snap, pid) in ("final", "bye")
 
 
 def win_prob(snap: Snapshot, now=None):
@@ -707,9 +731,9 @@ def win_prob(snap: Snapshot, now=None):
             if not pid:
                 continue
             state, p = game_state(snap, pid, now), snap.p(pid)
-            if state != "pre":
+            if state in ("live", "final"):
                 diff += sign * (p.actual or 0.0)
-            if state == "final" or not startable(snap, pid) or p.pts <= 0:
+            if state in ("final", "bye") or not startable(snap, pid) or p.pts <= 0:
                 continue
             left = 1.0 if state == "pre" else snap.game_left.get(p.team)
             if left is None:
@@ -733,19 +757,19 @@ def section_live(snap: Snapshot, state: dict):
     first_poll = "pts" not in state  # no baseline yet (new week or reset): record, don't report jumps
     for pid in mine:
         d = act(pid) - prev_pts.get(pid, 0.0)
-        if not first_poll and d >= LIVE_JUMP and game_state(snap, pid) != "pre":
+        if not first_poll and d >= LIVE_JUMP and game_state(snap, pid) in ("live", "final"):
             events.append(f"  🔥 {snap.label(pid)} +{d:.1f}, now {act(pid):.1f}")
     for pid in theirs:
         d = act(pid) - prev_pts.get(pid, 0.0)
-        if not first_poll and d >= LIVE_JUMP and game_state(snap, pid) != "pre":
+        if not first_poll and d >= LIVE_JUMP and game_state(snap, pid) in ("live", "final"):
             events.append(f"  😬 their {snap.label(pid)} +{d:.1f}, now {act(pid):.1f}")
     for pid in mine:
         if game_state(snap, pid) == "final" and pid not in reported_final:
             diff = act(pid) - snap.pts(pid)
             finals.append(f"  ✅ {snap.label(pid)} final {act(pid):.1f} (proj {snap.pts(pid):.1f}, {diff:+.1f})")
             reported_final.add(pid)
-    my_left = [p for p in mine if game_state(snap, p) != "final"]
-    opp_left = [p for p in theirs if game_state(snap, p) != "final"]
+    my_left = [p for p in mine if not week_over(snap, p)]
+    opp_left = [p for p in theirs if not week_over(snap, p)]
     new_state = {"pts": {pid: act(pid) for pid in mine + theirs}, "final": sorted(reported_final),
                  "done": state.get("done", False), "left": len(my_left) + len(opp_left)}
     endgame = 0 < len(my_left) + len(opp_left) <= 4
@@ -764,13 +788,13 @@ def section_live(snap: Snapshot, state: dict):
                 return ", ".join(f"{snap.label(p)} (proj {snap.pts(p):.1f}{', live' if game_state(snap, p) == 'live' else ''})" for p in pids) or "nobody"
             lead = f"Up {diff:.1f}" if diff > 0 else f"Down {-diff:.1f}" if diff < 0 else "Tied"
             lines.append(f"  📊 {lead}. Left: you {left_txt(my_left)}; them {left_txt(opp_left)}.")
-    all_done = mine and all(game_state(snap, p) == "final" for p in mine)
+    all_done = mine and all(week_over(snap, p) for p in mine)
     if all_done and not state.get("done"):
         my_total, opp_total = sum(act(p) for p in mine), sum(act(p) for p in theirs)
         wl = "W" if my_total > opp_total else "L" if my_total < opp_total else "T"
         if not lines:
             lines.append(f"*{snap.name}*")
-        opp_left = sum(1 for p in theirs if game_state(snap, p) != "final")
+        opp_left = sum(1 for p in theirs if not week_over(snap, p))
         tail = f" ({opp_left} of theirs still to play)" if opp_left else ""
         lines.append(f"  🏁 Your week is done: {wl} {my_total:.1f} to {opp_total:.1f}{tail}")
         new_state["done"] = True

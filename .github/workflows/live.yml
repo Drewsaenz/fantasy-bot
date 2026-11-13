@@ -47,9 +47,13 @@ jobs:
 
       - name: Live updates to Telegram
         id: live
+        # active: the script wrote live_state.json this run, which it only does while a game is in
+        # progress or one has just gone final. The file itself is always here (restored from cache), so
+        # its presence says nothing.
         run: |
-          python fantasy_check.py --mode live --telegram | tee live.out
-          if [ -s live.out ]; then echo active=true >> "$GITHUB_OUTPUT"; else echo active=false >> "$GITHUB_OUTPUT"; fi
+          touch .poll_start
+          python fantasy_check.py --mode live --telegram
+          if [ live_state.json -nt .poll_start ]; then echo active=true >> "$GITHUB_OUTPUT"; else echo active=false >> "$GITHUB_OUTPUT"; fi
         env:
           SLEEPER_CACHE_DIR: .cache
           ESPN_S2: ${{ secrets.ESPN_S2 }}
@@ -58,14 +62,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Save last poll
-        if: hashFiles('live_state.json') != ''
+        if: steps.live.outputs.active == 'true'
         uses: actions/cache/save@v4
         with:
           path: live_state.json
           key: live-state-${{ github.run_id }}
 
-      # Refresh the dashboard whenever a game is in progress (state file was touched this run)
-      - if: hashFiles('live_state.json') != ''
+      # Refresh the dashboard only while a game is in progress; a quiet tick ends here
+      - if: steps.live.outputs.active == 'true'
         name: Build dashboard
         run: python fantasy_check.py --mode dashboard --out site/index.html
         env:

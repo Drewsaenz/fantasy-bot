@@ -179,17 +179,19 @@ def main():
             failures.append(f"{name}: {type(e).__name__}: {e}")
             traceback.print_exc()
 
-    # Sleeper's schedule has dates but no kickoff times; borrow ESPN's if we have them
-    kick = next((s.kickoffs for s in snaps if s.kickoffs), {})
-    status = next((s.game_status for s in snaps if s.game_status), {})
-    games = next((s.games for s in snaps if s.games), {})
+    # Sleeper's schedule has dates but no kickoff times; borrow ESPN's if we have them. Only from a league
+    # on the same week: around the Tuesday rollover the two can disagree, and last week's kickoffs would
+    # lock everyone.
     for snap in snaps:
-        if not snap.kickoffs and kick:
-            snap.kickoffs = kick
-        if not snap.game_status and status:  # ESPN has no game-complete signal; Sleeper's schedule does
-            snap.game_status = status
-        if not snap.games and games:
-            snap.games = games
+        same = [s for s in snaps if s is not snap and s.week == snap.week]
+        if not snap.kickoffs:
+            snap.kickoffs = next((s.kickoffs for s in same if s.kickoffs), {})
+        if not snap.game_status:  # ESPN has no game-complete signal; Sleeper's schedule does
+            snap.game_status = next((s.game_status for s in same if s.game_status), {})
+        if not snap.games:
+            snap.games = next((s.games for s in same if s.games), {})
+        if len(snaps) > 1 and not same:
+            print(f"note: {snap.key} is on week {snap.week}, the other league is not; schedule data not shared", file=sys.stderr)
 
     if args.mode == "dashboard":
         import dashboard
@@ -209,7 +211,7 @@ def main():
     if args.mode == "watch" and snaps:
         wk = snaps[0].week
         if state.get("week") != wk:
-            state = {"week": wk}
+            state = core.watch_rollover(state, wk)
 
     for snap in snaps:
         if args.mode == "live":
@@ -247,10 +249,9 @@ def main():
 
     if args.mode == "live":
         state["final_teams"] = sorted(complete | set(state.get("final_teams", [])))
-    if args.mode in ("live", "watch"):
+    if args.mode in ("live", "watch") and not any(l.strip() for l in lines):
         state_path.write_text(json.dumps(state))
-        if not any(l.strip() for l in lines):
-            return  # polled, nothing new
+        return  # polled, nothing new
 
     report = "\n".join(lines).rstrip() + "\n"
     stamp = time.strftime("%Y-%m-%d %H:%M")
@@ -280,6 +281,10 @@ def main():
                 post_failed = True
                 if args.notify:
                     notify(f"{label} post failed", str(e)[:200])
+    # live/watch remember what they reported only once it has been delivered, so a failed send is
+    # reported again on the next poll wherever this runs (not just where a workflow skips its save step).
+    if args.mode in ("live", "watch") and not post_failed:
+        state_path.write_text(json.dumps(state))
     sys.exit(1 if post_failed or (failures and not snaps) else 0)
 
 
