@@ -85,5 +85,18 @@ check("empty list is healthy", st_of([]), None)
 check("OUT maps", st_of("OUT"), "Out")
 check("unknown status is shown, not healthy", st_of("DAY_TO_DAY"), "Day To Day")
 
+# --- free-agent pickups: a defense replaces the defense, a skill player the weakest bench player ---
+d1, d2 = Player("d1", "CIN", "DEF", "CIN", pts=6.3), Player("d2", "HOU", "DEF", "HOU", pts=8.2)
+wr, bn = Player("w", "W One", "WR", "SF", pts=12), Player("n", "N Bench", "WR", "DAL", pts=5, trend=[5.0])
+s = snap([wr, bn, d1, d2], ["w", "d1"], slots=["WR", "DEF"])
+s.me.players = ["w", "n", "d1"]
+s.free_agents = ["d2"]
+check("D/ST pickup drops the D/ST it replaces", core.todo_moves(s), [("Add", "HOU D/ST 8.2 over CIN D/ST 6.3, drop CIN D/ST")])
+check("report agrees", core.section_free_agents(s, ["w", "d1"])[0][1], "  drop CIN D/ST")
+fa_wr = Player("f", "F Agent", "WR", "NYJ", pts=15)
+s.players["f"] = fa_wr
+s.free_agents = ["f"]
+check("skill pickup still drops the weakest bench player", core.todo_moves(s)[0][1].endswith("drop N. Bench"), True)
+
 print("all good" if not failed else f"{failed} failed")
 raise SystemExit(1 if failed else 0)

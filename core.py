@@ -304,6 +304,14 @@ def fa_pickups(snap: Snapshot, best):
     return picks, bench
 
 
+def pickup_drop(snap: Snapshot, floor, fa, bench):
+    """Who makes room for a free-agent add. A kicker or defense replaces the one he beats: nobody carries
+    two, and dropping a bench player for one costs depth for nothing. Anyone else, the weakest bench player."""
+    if floor and snap.p(fa).pos in ("K", "DEF") and snap.p(floor).pos == snap.p(fa).pos:
+        return floor
+    return bench[0] if bench else None
+
+
 def section_free_agents(snap: Snapshot, best):
     lines, issues = [], []
     picks, bench = fa_pickups(snap, best)
@@ -311,8 +319,13 @@ def section_free_agents(snap: Snapshot, best):
                 for slot, floor, fas in picks for fa in fas]
     if fa_lines:
         lines.append("➕ FA: " + "; ".join(fa_lines))
-        if bench:
-            lines.append(f"  drop {short(snap, bench[0], pts=False)}")
+        drops = []
+        for slot, floor, fas in picks:
+            d = pickup_drop(snap, floor, fas[0], [b for b in bench if b not in drops])
+            if d and d not in drops:
+                drops.append(d)
+        if drops:
+            lines.append("  drop " + ", ".join(short(snap, d, pts=False) for d in drops))
         issues.append(plural(len(fa_lines), "FA pickup"))
     return lines, issues
 
@@ -327,9 +340,10 @@ def todo_moves(snap: Snapshot):
     picks, bench = fa_pickups(snap, best)
     drops, adds = list(bench), []
     for slot, floor, fas in picks:
-        # A K or DEF sitting out this week is the one a streamer replaces; anyone else, drop the weakest bench player.
+        # A K or DEF sitting out this week is the one a streamer replaces, else the starter he beats;
+        # anyone else, drop the weakest bench player.
         same = next((p for p in to_sit if snap.p(p).pos == snap.p(fas[0]).pos in ("K", "DEF")), None)
-        drop = same or (drops[0] if drops else None)
+        drop = same or pickup_drop(snap, floor, fas[0], drops)
         if drop in drops:
             drops.remove(drop)
         alt = f" (or {short(snap, fas[1])})" if len(fas) > 1 else ""
