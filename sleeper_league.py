@@ -128,14 +128,24 @@ def build(mode="check", week=None) -> Snapshot:
             note=" ".join(x for x in (p.get("injury_body_part"), p.get("injury_notes")) if x),
         )
 
+    # Who is on each roster comes from the week's matchup when it has it: after an add/drop the matchup
+    # shows the new roster at once, while /rosters lags by minutes. Mixing the two once had the report
+    # say "start CIN D/ST" for a defense that had just been dropped.
+    try:
+        matchups = get(f"{BASE}/league/{league_id}/matchups/{week}") or []
+    except requests.RequestException:
+        matchups = []
+    fresh = {str(m.get("roster_id")): m.get("players") for m in matchups if m.get("players")}
+
     players = {}
     rostered = set()
     teams, me, mine_roster = [], None, None
     for r in rosters:
         parked = set(r.get("reserve") or []) | set(r.get("taxi") or [])
-        pids = [p for p in (r.get("players") or []) if p not in parked]
-        rostered |= set(r.get("players") or [])
-        for pid in r.get("players") or []:
+        listed = fresh.get(str(r["roster_id"])) or r.get("players") or []
+        pids = [p for p in listed if p not in parked]
+        rostered |= set(listed)
+        for pid in listed:
             players[pid] = mk(pid)
         s = r.get("settings") or {}
         owner = users_by_id.get(r.get("owner_id"), {})
@@ -165,7 +175,6 @@ def build(mode="check", week=None) -> Snapshot:
 
     # opponent
     try:
-        matchups = get(f"{BASE}/league/{league_id}/matchups/{week}")
         my_m = next(m for m in matchups if str(m["roster_id"]) == me.tid)
         opp_m = next(m for m in matchups
                      if m.get("matchup_id") == my_m.get("matchup_id") and str(m["roster_id"]) != me.tid)
