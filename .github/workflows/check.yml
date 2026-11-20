@@ -39,6 +39,7 @@ jobs:
           key: players-${{ steps.date.outputs.today }}
 
       - name: Lineup check to Telegram
+        id: report
         run: python fantasy_check.py --mode check --telegram
         env:
           SLEEPER_CACHE_DIR: .cache
@@ -56,12 +57,24 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # deploy-pages sometimes can't see the artifact uploaded a second earlier ("Fetching artifact
+      # metadata failed", 2026-11-20); a second try half a minute later gets it.
       - id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
       - if: failure()
         name: Say so in Telegram
-        run: bash tools/telegram_fail.sh "lineup check"
+        run: |
+          if [ "${{ steps.report.outcome }}" = success ]; then
+            bash tools/telegram_fail.sh "lineup check" "The report went out, but the dashboard didn't update."
+          else
+            bash tools/telegram_fail.sh "lineup check"
+          fi
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

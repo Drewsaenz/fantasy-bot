@@ -4,8 +4,9 @@
 # report posted looks exactly like a quiet day.
 set -euo pipefail
 what=${1:-job}
+msg=${2:-"The $what run failed before it could report."}
 url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
 curl -sS --fail-with-body -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
   --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
   --data-urlencode "disable_web_page_preview=true" \
-  --data-urlencode "text=❌ The $what run failed before it could report. Log: $url"
+  --data-urlencode "text=❌ $msg Log: $url"
